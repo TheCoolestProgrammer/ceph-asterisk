@@ -1,6 +1,7 @@
 import shutil
 import subprocess
 from fastapi import Depends, FastAPI, HTTPException, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 import docker
@@ -58,6 +59,11 @@ class AsteriskInstance(Base):
 
 Base.metadata.create_all(bind=engine)
 
+class AsteriskInstanceUpdate(BaseModel):
+    name: Optional[str] = None
+    sip_port: Optional[int] = None
+    http_port: Optional[int] = None
+    status: Optional[str] = None
 
 class SIPUser(Base):
     __tablename__ = "sip_users"
@@ -85,6 +91,13 @@ Base.metadata.create_all(bind=engine)
 docker_client = docker.from_env()
 app = FastAPI(title="Asterisk Manager")
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5173"],  # Vue dev server порты
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 def get_db():
     db = SessionLocal()
@@ -587,6 +600,56 @@ async def create_instance(
             status_code=500, detail=f"Failed to create instance: {str(e)}"
         )
 
+@app.put("/instances/{instance_id}", response_model=AsteriskInstanceResponse)
+async def update_instance(
+    instance_id: int, 
+    instance_update: AsteriskInstanceUpdate, 
+    db: Session = Depends(get_db)
+):
+    """Обновление экземпляра Asterisk"""
+    instance = db.query(AsteriskInstance).filter(AsteriskInstance.id == instance_id).first()
+    if not instance:
+        raise HTTPException(status_code=404, detail="Instance not found")
+
+    # Проверяем уникальность имени, если оно меняется
+    if instance_update.name and instance_update.name != instance.name:
+        existing_instance = (
+            db.query(AsteriskInstance)
+            .filter(AsteriskInstance.name == instance_update.name)
+            .first()
+        )
+        if existing_instance:
+            raise HTTPException(status_code=400, detail="Instance name already exists")
+
+    # Проверяем уникальность портов, если они меняются
+    if instance_update.sip_port and instance_update.sip_port != instance.sip_port:
+        existing_sip_port = (
+            db.query(AsteriskInstance)
+            .filter(AsteriskInstance.sip_port == instance_update.sip_port)
+            .first()
+        )
+        if existing_sip_port:
+            raise HTTPException(status_code=400, detail="SIP port already in use")
+
+    if instance_update.http_port and instance_update.http_port != instance.http_port:
+        existing_http_port = (
+            db.query(AsteriskInstance)
+            .filter(AsteriskInstance.http_port == instance_update.http_port)
+            .first()
+        )
+        if existing_http_port:
+            raise HTTPException(status_code=400, detail="HTTP port already in use")
+
+    # Обновляем поля
+    update_data = instance_update.dict(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(instance, field, value)
+
+    db.commit()
+    db.refresh(instance)
+
+    return instance
+
 
 def start_asterisk_container(instance: AsteriskInstance, db: Session):
     # Create docker-compose.yml
@@ -726,27 +789,74 @@ async def update_config(
 
 
 @app.delete("/instances/{instance_id}")
-def delete_instance(instance_id: int, db: SessionLocal = Depends(get_db)):
+def delete_instance(instance_id: int, db: Session = Depends(get_db)):
     instance = (
         db.query(AsteriskInstance).filter(AsteriskInstance.id == instance_id).first()
     )
     if not instance:
         raise HTTPException(status_code=404, detail="Instance not found")
 
-    # Stop and remove container
-    os.system(f"cd /tmp/asterisk-{instance.name} && docker-compose down")
+    try:
+        # Stop and remove container
+        compose_path = f"./docker-compose/asterisk-{instance.name}"
+        
+        # Проверяем существование директории docker-compose перед удалением
+        if os.path.exists(compose_path):
+            result = subprocess.run(
+                ["docker-compose", "down"],
+                cwd=compose_path,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode != 0:
+                print(f"Warning: Failed to stop container: {result.stderr}")
+        else:
+            print(f"Compose path not found: {compose_path}")
 
-    # Cleanup
-    import shutil
+        # Cleanup config directory with error handling
+        if instance.config_path:
+            config_path = instance.config_path
+            # Если config_path начинается с ceph://, пропускаем удаление файлов
+            if config_path.startswith("ceph://"):
+                print(f"Skipping filesystem cleanup for Ceph path: {config_path}")
+            elif os.path.exists(config_path):
+                try:
+                    shutil.rmtree(config_path)
+                    print(f"Config directory removed: {config_path}")
+                except FileNotFoundError:
+                    print(f"Config directory already deleted: {config_path}")
+                except Exception as e:
+                    print(f"Warning: Could not remove config directory {config_path}: {e}")
+            else:
+                print(f"Config directory not found: {config_path}")
 
-    shutil.rmtree(instance.config_path)
-    shutil.rmtree(f"/tmp/asterisk-{instance.name}")
+        # Cleanup compose directory with error handling
+        if os.path.exists(compose_path):
+            try:
+                shutil.rmtree(compose_path)
+                print(f"Compose directory removed: {compose_path}")
+            except FileNotFoundError:
+                print(f"Compose directory already deleted: {compose_path}")
+            except Exception as e:
+                print(f"Warning: Could not remove compose directory {compose_path}: {e}")
+        else:
+            print(f"Compose directory not found: {compose_path}")
 
-    db.delete(instance)
-    db.commit()
+        # Delete from database
+        db.delete(instance)
+        db.commit()
 
-    return {"message": "Instance deleted"}
+        return {"message": "Instance deleted successfully"}
 
+    except subprocess.TimeoutExpired:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Timeout during container shutdown")
+    except Exception as e:
+        db.rollback()
+        print(f"Error during instance deletion: {e}")
+        raise HTTPException(status_code=500, detail=f"Error during deletion: {str(e)}")
+    
 
 def create_default_configs(config_dir: str, instance: AsteriskInstanceCreate):
     """Создание конфигурационных файлов с правильными правами"""
@@ -905,7 +1015,7 @@ async def get_config(instance_id: int, config_type: str, db: Session = Depends(g
 
 @app.post("/cdr/simulate/")
 async def simulate_calls(
-    instance_name: str, count: int = 10, db: Session = Depends(get_db)
+    instance_name: str, count: int = 5, db: Session = Depends(get_db)
 ):
     """Симуляция тестовых звонков"""
 
