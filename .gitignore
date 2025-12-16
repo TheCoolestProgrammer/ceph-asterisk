@@ -12,3 +12,8 @@ wheels/
 asterisk_configs/
 docker-compose/
 docker-compose.yaml
+
+#docker - ceph
+etc/
+srv/
+mystuff/
