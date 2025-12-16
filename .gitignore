@@ -17,3 +17,5 @@ docker-compose.yaml
 etc/
 srv/
 mystuff/
+
+.env

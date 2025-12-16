@@ -1,6 +1,23 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+
+class AsteriskInstanceUpdate(BaseModel):
+    name: Optional[str] = None
+    sip_port: Optional[int] = None
+    http_port: Optional[int] = None
+    status: Optional[str] = None
+
+
+class CDRGet(BaseModel):
+    instance_name: Optional[str] = (None,)
+    src: Optional[str] = (None,)
+    dst: Optional[str] = (None,)
+    date_from: Optional[str] = (None,)
+    date_to: Optional[str] = (None,)
+    limit: int = (100,)
+    offset: int = (0,)
 
 
 class CDRRecord(BaseModel):
