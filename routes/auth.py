@@ -1,14 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import HTTPBearer
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from models.user import User
-from schemas.auth import UserLogin, UserRegister, Token
+from schemas.auth import TokenRefresh, UserLogin, UserRegister, Token
 from schemas.user import UserResponse
 from security import (
     verify_password,
     get_password_hash,
-    create_access_token,
+    create_tokens,
     verify_token,
 )
 from database import get_db
@@ -17,13 +17,17 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 security = HTTPBearer()
 
 
-def get_current_user(token: str = Depends(security), db: Session = Depends(get_db)):
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
+):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
     )
 
-    payload = verify_token(token.credentials)
+    payload = verify_token(credentials.credentials, is_refresh=False)
     if payload is None:
         raise credentials_exception
 
@@ -43,7 +47,7 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
     existing_user = db.query(User).filter(User.login == user_data.login).first()
     if existing_user:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="login already registered"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Login already registered"
         )
 
     hashed_password = get_password_hash(user_data.password)
@@ -67,12 +71,43 @@ def login(user_data: UserLogin, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect login or password",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Создаем токен
-    access_token = create_access_token(data={"user_id": user.id, "login": user.login})
+    # Создаем пару токенов
+    tokens = create_tokens(user_id=user.id, login=user.login)
 
-    return {"access_token": access_token, "token_type": "bearer"}
+    return tokens
+
+
+@router.post("/refresh", response_model=Token)
+def refresh_token(token_data: TokenRefresh, db: Session = Depends(get_db)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid refresh token",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    # Проверяем refresh токен
+    payload = verify_token(token_data.refresh_token, is_refresh=True)
+    if payload is None:
+        raise credentials_exception
+
+    user_id: int = payload.get("user_id")
+    login: str = payload.get("login")
+
+    if user_id is None or login is None:
+        raise credentials_exception
+
+    # Проверяем, существует ли пользователь
+    user = db.query(User).filter(User.id == user_id, User.login == login).first()
+    if user is None:
+        raise credentials_exception
+
+    # Создаем новую пару токенов
+    tokens = create_tokens(user_id=user.id, login=user.login)
+
+    return tokens
 
 
 @router.get("/me", response_model=UserResponse)
