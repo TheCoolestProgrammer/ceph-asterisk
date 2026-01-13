@@ -1,0 +1,4 @@
+# Create organizational unit for users
+dn: ou=users,dc=planeta,dc=ru
+objectClass: organizationalUnit
+ou: users

@@ -1,0 +1,15 @@
+dn: uid=simpleuser,ou=users,dc=planeta,dc=ru
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: simpleuser
+sn: Simple
+givenName: User
+cn: Simple User
+displayName: Simple User
+uidNumber: 10002
+gidNumber: 10002
+userPassword: {SSHA}KLidKpMcsBydi0jdcnoVSgAAXpXfcUl/
+homeDirectory: /home/simpleuser
+loginShell: /bin/bash
+mail: simpleuser@example.org

@@ -7,6 +7,9 @@ from routes import cdr, users, auth
 from routes.instances import instances, instancesCRUD
 from routes.instances.configs import instance_configs
 
+from config import config
+from ldap_auth import LDAPAuth
+
 Base.metadata.create_all(bind=engine)
 # Docker client
 docker_client = docker.from_env()

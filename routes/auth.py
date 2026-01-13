@@ -10,8 +10,10 @@ from security import (
     get_password_hash,
     create_tokens,
     verify_token,
+    create_LDAP_tokens,
 )
 from database import get_db
+from ldap_auth import ldap_auth
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 security = HTTPBearer()
@@ -76,6 +78,22 @@ def login(user_data: UserLogin, db: Session = Depends(get_db)):
 
     # Создаем пару токенов
     tokens = create_tokens(user_id=user.id, login=user.login)
+
+    return tokens
+
+
+@router.post("/login/ldap", response_model=Token)
+def login_LDAP(user_data: UserLogin, db: Session = Depends(get_db)):
+    ldap_user = ldap_auth.authenticate(user_data.login, user_data.password)
+    if ldap_user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect login or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    print(ldap_user)
+    # Создаем пару токенов
+    tokens = create_LDAP_tokens(email=ldap_user["email"], login=ldap_user["username"])
 
     return tokens
 

@@ -19,3 +19,8 @@ srv/
 mystuff/
 
 .env
+
+#LDAP
+ldap_data/
+ldap_config/
+

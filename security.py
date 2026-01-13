@@ -68,3 +68,15 @@ def create_tokens(user_id: int, login: str) -> dict[str, str]:
         "refresh_token": refresh_token,
         "token_type": "bearer",
     }
+
+
+def create_LDAP_tokens(email: str, login: str) -> dict[str, str]:
+    """Создает пару access и refresh токенов"""
+    access_token = create_access_token(data={"email": email, "login": login})
+    refresh_token = create_refresh_token(data={"email": email, "login": login})
+
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+    }
