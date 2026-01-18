@@ -1,0 +1,16 @@
+services:
+  asterisk-test_ats3:
+    container_name: asterisk-test_ats3
+    image: andrius/asterisk:latest
+    ports:
+    - 5069:5069/udp
+    - 5069:5069/tcp
+    - 8087:8087/tcp
+    - "10000-10100:10000-10100/udp"  # RTP
+    privileged: true
+    volumes:
+    # - D:\projects\python3\ceph\ceph-asterisk5\ceph-asterisk\asterisk_configs\test_ats3:/etc/asterisk:rw
+    # - D:\projects\python3\ceph\ceph-asterisk5\ceph-asterisk\asterisk_configs\test_ats3\sounds:/var/lib/asterisk/sounds/en:ro
+    - ./asterisk_configs/test_atc3:/etc/asterisk:rw
+    - ./saterisk_configs/test_atc3/sounds:/var/lib/saterisk/sounds/en:ro
+version: '3.8'
