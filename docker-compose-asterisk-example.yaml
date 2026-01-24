@@ -11,6 +11,6 @@ services:
     volumes:
     # - D:\projects\python3\ceph\ceph-asterisk5\ceph-asterisk\asterisk_configs\test_ats3:/etc/asterisk:rw
     # - D:\projects\python3\ceph\ceph-asterisk5\ceph-asterisk\asterisk_configs\test_ats3\sounds:/var/lib/asterisk/sounds/en:ro
-    - ./asterisk_configs/test_atc3:/etc/asterisk:rw
-    - ./saterisk_configs/test_atc3/sounds:/var/lib/saterisk/sounds/en:ro
+    - ./asterisk_configs/test_ats3:/etc/asterisk:rw
+    - ./asterisk_configs/test_ats3/sounds:/var/lib/asterisk/sounds/en:ro
 version: '3.8'
