@@ -24,3 +24,5 @@ mystuff/
 ldap_data/
 ldap_config/
 
+#mysql
+mysql_data/

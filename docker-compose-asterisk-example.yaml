@@ -1,7 +1,8 @@
 services:
   asterisk-test_ats3:
     container_name: asterisk-test_ats3
-    image: andrius/asterisk:latest
+    # image: andrius/asterisk:latest
+    build: .
     ports:
     - 5069:5069/udp
     - 5069:5069/tcp
@@ -13,4 +14,6 @@ services:
     # - D:\projects\python3\ceph\ceph-asterisk5\ceph-asterisk\asterisk_configs\test_ats3\sounds:/var/lib/asterisk/sounds/en:ro
     - ./asterisk_configs/test_ats3:/etc/asterisk:rw
     - ./asterisk_configs/test_ats3/sounds:/var/lib/asterisk/sounds/en:ro
+    - ./asterisk_configs/test_ats3/drivers/odbc.ini:/etc/odbc.ini
+    - ./asterisk_configs/test_ats3/drivers/odbcinst.ini:/etc/odbcinst.ini
 version: '3.8'

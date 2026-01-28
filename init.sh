@@ -1,0 +1,7 @@
+#!/bin/bash
+mysql -u root -p"$MYSQL_ROOT_PASSWORD" <<EOF
+CREATE DATABASE IF NOT EXISTS asterisk_cdr; 
+CREATE USER IF NOT EXISTS 'asterisk_user'@'%' IDENTIFIED BY '${ASTERISK_USER_PASSWORD}';
+GRANT ALL PRIVILEGES ON asterisk_cdr.* TO 'asterisk_user'@'%';
+FLUSH PRIVILEGES;
+EOF

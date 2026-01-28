@@ -1,10 +1,20 @@
-from pydantic import field_validator
+from pydantic import field_validator, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Config(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env")
-    DATABASE_URL: str
+    HOSTNAME:str
+    MYSQL_DATABASE:str
+    MYSQL_USER:str
+    MYSQL_PASSWORD:str
+    MYSQL_PORT:int
+
+    @computed_field
+    @property
+    def DATABASE_URL(self)->str:
+        return f"mysql+pymysql://{self.MYSQL_USER}:{self.MYSQL_PASSWORD}@{self.HOSTNAME}/{self.MYSQL_DATABASE}"
+ 
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 20
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     ALGORITHM: str = "HS256"
