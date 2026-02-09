@@ -1,6 +1,6 @@
 services:
   mysql-asterisk:
-    container_name: mysql-asterisk
+    container_name: ${MYSQL_CONTAINER_NAME}
     image: mysql:8.0
     command: --default-authentication-plugin=mysql_native_password
     environment:
@@ -9,7 +9,7 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE}
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-      ASTERISK_USER_PASSWORD: ${ASTERISK_USER_PASSWORD}
+      MYSQL_ASTERISK_USER_PASSWORD: ${MYSQL_ASTERISK_USER_PASSWORD}
     ports:
       - "${MYSQL_PORT}:3306"
     volumes:

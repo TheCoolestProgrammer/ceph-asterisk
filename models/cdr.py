@@ -1,9 +1,8 @@
 from sqlalchemy import Column, String, DateTime, Integer
-from sqlalchemy.orm import DeclarativeBase
 import datetime
-from database import Base
+from database import BaseCDR
 
-class CDR(Base):
+class CDR(BaseCDR):
     __tablename__ = 'asterisk_cdr'
 
     accountcode = Column(String(80), default='')

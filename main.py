@@ -1,8 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import docker
 
-from database import Base, engine
+from database import Base, engine, BaseCDR, engine_cdr
 from routes import cdr, users, auth
 from routes.instances import instances, instancesCRUD
 from routes.instances.configs import instance_configs
@@ -11,8 +10,7 @@ from config import config
 from ldap_auth import LDAPAuth
 
 Base.metadata.create_all(bind=engine)
-# Docker client
-docker_client = docker.from_env()
+BaseCDR.metadata.create_all(bind=engine_cdr)
 app = FastAPI(title="Asterisk Manager")
 
 app.add_middleware(

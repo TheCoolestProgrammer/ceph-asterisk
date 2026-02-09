@@ -1,8 +1,10 @@
+import docker
 import os
 import shutil
 import subprocess
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 import yaml
+from config import config
 
 from database import SessionLocal, get_db
 from models.asterisk_instance import AsteriskInstance
@@ -36,9 +38,9 @@ async def get_instance(instance_id: int, db: Session = Depends(get_db)):
 @router.post("", response_model=AsteriskInstanceResponse)
 async def create_instance(
     instance: AsteriskInstanceCreate,
+    create_test_users: bool,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    create_test_users: bool = True,
 ):
     """Создание нового экземпляра Asterisk"""
     # Check if instance name already exists
@@ -55,6 +57,8 @@ async def create_instance(
         .filter(
             (AsteriskInstance.sip_port == instance.sip_port)
             | (AsteriskInstance.http_port == instance.http_port)
+            | (AsteriskInstance.rtp_port_start==instance.rtp_port_start)
+            | (AsteriskInstance.rtp_port_end==instance.rtp_port_end)
         )
         .first()
     ):
@@ -63,7 +67,9 @@ async def create_instance(
     # Create config directory
     config_dir = f"./asterisk_configs/{instance.name}"
     os.makedirs(config_dir, exist_ok=True)
-
+    os.chmod(config_dir, 0o777)
+    os.makedirs(f"{config_dir}/drivers", exist_ok=True)
+    os.chmod(f"{config_dir}/drivers", 0o777)
     try:
         # Create basic Asterisk config files
         create_default_configs(config_dir, instance)
@@ -73,6 +79,8 @@ async def create_instance(
             name=instance.name,
             sip_port=instance.sip_port,
             http_port=instance.http_port,
+            rtp_port_start=instance.rtp_port_start,
+            rtp_port_end=instance.rtp_port_end,
             config_path=config_dir,
             status="creating",
         )
@@ -248,162 +256,317 @@ def create_default_configs(config_dir: str, instance: AsteriskInstanceCreate):
     """Создание конфигурационных файлов с правильными правами"""
 
     # Создаем директорию если не существует
-    os.makedirs(config_dir, exist_ok=True)
+    # os.makedirs(config_dir, exist_ok=True)
 
     configs = {
         "asterisk.conf": f"""[directories]
-            astetcdir => /etc/asterisk
-            astmoddir => /usr/lib/asterisk/modules
-            astvarlibdir => /var/lib/asterisk
-            astdbdir => /var/lib/asterisk
-            astkeydir => /var/lib/asterisk
-            astdatadir => /var/lib/asterisk
-            astagidir => /var/lib/asterisk/agi-bin
-            astspooldir => /var/spool/asterisk
-            astrundir => /var/run/asterisk
-            astlogdir => /var/log/asterisk
+astetcdir => /etc/asterisk
+astmoddir => /usr/lib/asterisk/modules
+astvarlibdir => /var/lib/asterisk
+astdbdir => /var/lib/asterisk
+astkeydir => /var/lib/asterisk
+astdatadir => /var/lib/asterisk
+astagidir => /var/lib/asterisk/agi-bin
+astspooldir => /var/spool/asterisk
+astrundir => /var/run/asterisk
+astlogdir => /var/log/asterisk
 
-            [options]
-            verbose = 3
-            debug = 0
-            maxfiles = 100000
-            systemname = {instance.name}
+[options]
+verbose = 3
+debug = 0
+maxfiles = 100000
+systemname = {instance.name}
             """,
         "logger.conf": """[general]
-            dateformat=%F %T
+dateformat=%F %T
 
-            [logfiles]
-            console => error,warning,notice
-            messages => notice,warning,error
+[logfiles]
+console => error,warning,notice
+messages => notice,warning,error
+            
             """,
         "modules.conf": """[modules]
-            autoload = yes
-            load = pbx_config.so
-            load = app_dial.so
-            load = app_playback.so
-            load = res_rtp_asterisk.so
-            load = codec_ulaw.so
-            load = codec_alaw.so
-            load = format_wav.so
-            load = chan_sip.so
+autoload = yes
+load => pbx_config.so
+load => app_dial.so
+load => app_playback.so
+load => res_rtp_asterisk.so
+load => codec_ulaw.so
+load => codec_alaw.so
+load => format_wav.so
+load => res_odbc.so
+load => cdr_adaptive_odbc.so
+            
             """,
-        "sip.conf": f"""[general]
-            context = default
-            bindaddr = 0.0.0.0
-            bindport = {instance.sip_port}
-            srvlookup = yes
-            udpbindaddr = 0.0.0.0:{instance.sip_port}
-            transport = udp
+        "pjsip.conf": f"""[transport-udp]
+type=transport
+protocol=udp
+bind=0.0.0.0:{instance.sip_port}
+[101]
+type=endpoint
+context=from-internal
+disallow=all
+allow=ulaw,alaw
+auth=101-auth
+aors=101-aor
 
-            [6001]
-            type = friend
-            host = dynamic
-            secret = 123456
-            context = local
-            dtmfmode = rfc2833
+[101-auth]
+type=auth
+auth_type=userpass
+password=strongpassword  ; Ваш пароль
+username=101
 
-            [6002]
-            type = friend
-            host = dynamic
-            secret = 123456
-            context = local
-            dtmfmode = rfc2833
+[101-aor]
+type=aor
+max_contacts=1
+default_expiration=3600
+
+[200]
+type=endpoint
+context=from-external ; Важно! У внешних звонков должен быть свой контекст
+disallow=all
+allow=ulaw,alaw
+auth=200-auth
+aors=200-aor
+direct_media=no
+
+[200-auth]
+type=auth
+auth_type=userpass
+password=customerpass
+username=200
+
+[200-aor]
+type=aor
+max_contacts=1
+
             """,
-        "extensions.conf": """[general]
-            static=yes
+        "extensions.conf": """[from-internal]
+exten => 600,1,Answer()
 
-            [default]
-            exten => 100,1,Answer()
-                same => n,Playback(hello-world)
-                same => n,Hangup()
+same => n,Echo()
+same => n,Hangup()
 
-            [local]
-            exten => 6001,1,Dial(SIP/6001,20)
-            exten => 6002,1,Dial(SIP/6002,20)
-            exten => _6XXX,1,Dial(SIP/${EXTEN})
-            exten => h,1,Hangup()
+exten => 101,1,Dial(PJSIP/101)
+[from-external]
+exten => 777,1,NoOp(Входящий звонок от клиента ${CALLERID(all)})
+same => n,Answer()
+same => n,Dial(PJSIP/101,20)
+same => n,Hangup()
             """,
         "http.conf": f"""[general]
-            enabled=yes
-            bindaddr=0.0.0.0
-            bindport={instance.http_port}
+enabled=yes
+bindaddr=0.0.0.0
+bindport={instance.http_port}
             """,
-        "rtp.conf": """[general]
-            rtpstart=10000
-            rtpend=20000
+        "rtp.conf": f"""[general]
+rtpstart={instance.rtp_port_start}
+rtpend={instance.rtp_port_end}
             """,
         "stasis.conf": """[general]
-            enabled=no
+enabled=no
             """,
-        "cdr.conf": """[general]
-            enable=yes
+        "cdr.conf": f"""[general]
+enable=yes
+unanswered=yes
 
-            ; CDR в CSV файл
-            [csv]
-            usegmtime=yes
-            loguniqueid=yes
-            loguserfield=yes
+; CDR в CSV файл
+[csv]
+usegmtime=yes
+loguniqueid=yes
+loguserfield=yes
 
             ; CDR в MySQL (основной способ)
-            [mysql]
-            dsn=MySQL-asterisk-cdr
-            loguniqueid=yes
-            loguserfield=yes
-            table=cdr
+            ;[mysql]
+            ;    dsn={config.ASTERISK_ODBC_ID}
+            ;    loguniqueid=yes
+            ;    loguserfield=yes
+            ;    table={config.MYSQL_CDR_TABLE}
 
-            ; CDR в PostgreSQL (альтернатива)
-            ;[pgsql]
-            ;dsn=PostgreSQL-asterisk-cdr
             """,
-        "cdr_mysql.conf": f"""[global]
-            hostname=localhost
-            dbname=asterisk_cdr
-            password=mysql_password
-            user=asterisk_user
-            port=3306
+        #TODO: скорее всего этот файл не работает, нужно прочекать и в случае чего удалить 
+        # "cdr_mysql.conf": f"""
+            # [global]
+            #     hostname={config.HOSTNAME}
+            #     dbname={config.MYSQL_DATABASE}
+            #     password={config.MYSQL_PASSWORD}
+            #     user={config.MYSQL_USER}
+            #     port={config.MYSQL_PORT}
 
-            [asterisk_cdr]
-            table=cdr
-            ;timezone=UTC
+            # [{config.ASTERISK_ODBC_ID}]
+            #     table={config.MYSQL_CDR_TABLE}
+            #     ;timezone=UTC
+            
+            # """,
+        "./drivers/odbc.ini":f"""[{config.DSN}]
+Description = MySQL connection to Asterisk
+Driver      = MySQL
+Database    = {config.MYSQL_DATABASE_CDR}
+Server      = {config.MYSQL_CONTAINER_NAME}
+User        = {config.MYSQL_ASTERISK_USER}
+Password    = {config.MYSQL_ASTERISK_USER_PASSWORD}
+Port        = {config.MYSQL_PORT}
+        """,
+        "./drivers/odbcinst.ini":f"""[MySQL]
+Description = ODBC for MySQL
+Driver      = /usr/lib/x86_64-linux-gnu/odbc/libmaodbc.so
+FileUsage   = 1
+        """,
+        "res_odbc.conf":f"""[{config.ASTERISK_ODBC_ID}]            ; Имя, которое вы дадите этому линку в Asterisk
+enabled => yes
+dsn => {config.DSN} ; Должно совпадать с именем в /etc/odbc.ini
+username => {config.MYSQL_ASTERISK_USER}
+password => {config.MYSQL_ASTERISK_USER_PASSWORD}
+pre-connect => yes
+        """,
+        "cdr_adaptive_odbc.conf":f"""[mysql]
+connection={config.ASTERISK_ODBC_ID}  ; Имя из res_odbc.conf
+table={config.MYSQL_CDR_TABLE}              ; Имя таблицы в БД
             """,
+        
     }
-
+    ASTERISK_UID = 1000 
+    ASTERISK_GID = 1000
     for filename, content in configs.items():
         filepath = os.path.join(config_dir, filename)
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
         # Устанавливаем правильные права
-        os.chmod(filepath, 0o644)
+        os.chmod(filepath, 0o777)
+        os.chown(filepath, ASTERISK_UID, ASTERISK_GID)
+        # try:
+        #     os.chown(filepath, 0, 0)
+        # except PermissionError:
+        #     # Если нет прав на смену владельца, используем sudo
+        #     subprocess.run(['sudo', 'chown', f'{0}:{0}', filepath])
+    # os.chmod(config_dir, 0o777)
 
     print(f"Конфиги созданы в {config_dir}")
 
+
+def start_asterisk_container_by_library(instance: AsteriskInstance, db: Session):
+    
+    client = docker.from_env()
+    
+    try:
+        image = client.images.get(config.ASTERISK_IMAGE_TAG)
+        
+    except docker.errors.ImageNotFound:
+        image, logs = client.images.build(path=config.ASTERISK_IMAGE_PATH, tag=config.ASTERISK_IMAGE_TAG)
+    
+    base_path = os.path.abspath(instance.config_path)
+    try:
+        port_bindings = {
+        f'{instance.sip_port}/udp': instance.sip_port,
+        f'{instance.sip_port}/tcp': instance.sip_port,
+        f'{instance.http_port}/tcp': instance.http_port,
+        }
+        
+        # Добавляем RTP порты (диапазон)
+        rtp_ports = {}
+        for port in range(instance.rtp_port_start, instance.rtp_port_end + 1):
+            rtp_ports[f'{port}/udp'] = port
+        
+        # Объединяем все порты
+        port_bindings.update(rtp_ports)
+        
+        container = client.containers.run(
+            image=image,
+            name=f"{instance.name}",
+            detach=True,
+            privileged=True,
+            ports=port_bindings,
+            network='ceph-asterisk_default',
+            # Монтирование томов (Volumes)
+            volumes={
+                f'{base_path}': {'bind': '/etc/asterisk', 'mode': 'rw'},
+                f'{base_path}/sounds': {'bind': '/var/lib/asterisk/sounds/en', 'mode': 'ro'},
+                f'{base_path}/drivers/odbc.ini': {'bind': '/etc/odbc.ini', 'mode': 'ro'},
+                f'{base_path}/drivers/odbcinst.ini': {'bind': '/etc/odbcinst.ini', 'mode': 'ro'}
+            }
+        )
+        instance.status = "running"
+        db.commit()
+        print(f"Контейнер {instance.name} запущен успешно")
+    except Exception as e:
+        instance.status = "error"
+        db.commit()
+        print(f"Ошибка запуска: {e}")
+    # compose_path = f"./docker-compose/asterisk-{instance.name}"
+    # os.makedirs(compose_path, exist_ok=True)
+
+    # with open(f"{compose_path}/docker-compose.yml", "w") as f:
+    #     yaml.dump(compose_config, f)
+
+    # Перед запуском проверяем что файлы созданы
+
+    # ????????
+
+    # print(f"Проверка конфигов в {instance.config_path}:")
+    # for file in os.listdir(instance.config_path):
+    #     filepath = os.path.join(instance.config_path, file)
+    #     if os.path.isfile(filepath):
+    #         print(f"  {file} - {os.path.getsize(filepath)} bytes")
+
+    # Запускаем контейнер
+    # result = subprocess.run(
+    #     ["docker-compose", "up", "-d"],
+    #     cwd=compose_path,
+    #     capture_output=True,
+    #     text=True,
+    #     timeout=30,
+    # )
+
+    # if result.returncode == 0:
+    #     instance.status = "running"
+    #     db.commit()
+    #     print(f"Контейнер {instance.name} запущен успешно")
+    # else:
+    #     instance.status = "error"
+    #     db.commit()
+    #     print(f"Ошибка запуска: {result.stderr}")
+
+    # except Exception as e:
+    #     print(f"Error in start_asterisk_container: {e}")
+    #     instance.status = "error"
+    #     db.commit()
 
 def start_asterisk_container(instance: AsteriskInstance, db: Session):
     # Create docker-compose.yml
     compose_config = {
         "version": "3.8",
         "services": {
-            f"asterisk-{instance.name}": {
-                "image": "andrius/asterisk:latest",
+            f"{instance.name}": {
+                "build": ".",
                 "container_name": f"asterisk-{instance.name}",
                 "ports": [
                     f"{instance.sip_port}:{instance.sip_port}/udp",
                     f"{instance.http_port}:{instance.http_port}/tcp",
+                    f"{instance.rtp_port_start}-{instance.rtp_port_end}:{instance.rtp_port_start}-{instance.rtp_port_end}/udp"
                 ],
                 "volumes": [
-                    f"{os.path.abspath(instance.config_path)}:/etc/asterisk:rw"
+                    f"{os.path.abspath(instance.config_path)}:/etc/asterisk:rw",
+                    f"{os.path.abspath(instance.config_path)}/sounds:/var/lib/asterisk/sounds/en:ro",
+                    f"{os.path.abspath(instance.config_path)}/drivers/odbc.ini:/etc/odbc.ini",
+                    f"{os.path.abspath(instance.config_path)}/drivers/odbcinst.ini:/etc/odbcinst.ini"
                 ],
-                # "restart": "unless-stopped",
-                "network_mode": "bridge",
+                "networks": ["ceph-asterisk_default"],
                 "privileged": True,
             }
         },
+        # Добавляем этот блок:
+        "networks": {
+            "ceph-asterisk_default": {
+                "external": True
+            }
+        }
     }
 
-    compose_path = f"./docker-compose/asterisk-{instance.name}"
+    compose_path = f"./docker-compose/"
     os.makedirs(compose_path, exist_ok=True)
 
-    with open(f"{compose_path}/docker-compose.yml", "w") as f:
+    filename = f"docker-compose-{instance.name}.yml"
+    with open(f"{compose_path}/{filename}", "w") as f:
         yaml.dump(compose_config, f)
 
     # Перед запуском проверяем что файлы созданы
@@ -415,7 +578,7 @@ def start_asterisk_container(instance: AsteriskInstance, db: Session):
 
     # Запускаем контейнер
     result = subprocess.run(
-        ["docker-compose", "up", "-d"],
+        ["docker", "compose","-f",filename, "up", "-d"],
         cwd=compose_path,
         capture_output=True,
         text=True,
@@ -430,8 +593,3 @@ def start_asterisk_container(instance: AsteriskInstance, db: Session):
         instance.status = "error"
         db.commit()
         print(f"Ошибка запуска: {result.stderr}")
-
-    # except Exception as e:
-    #     print(f"Error in start_asterisk_container: {e}")
-    #     instance.status = "error"
-    #     db.commit()

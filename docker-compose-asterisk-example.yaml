@@ -1,19 +1,16 @@
 services:
-  asterisk-test_ats3:
-    container_name: asterisk-test_ats3
-    # image: andrius/asterisk:latest
+  asterisk-test_ats4:
+    container_name: asterisk-test_ats4
     build: .
     ports:
-    - 5069:5069/udp
-    - 5069:5069/tcp
-    - 8087:8087/tcp
-    - "10000-10100:10000-10100/udp"  # RTP
+    - 5070:5069/udp
+    - 5070:5069/tcp
+    - 8088:8087/tcp
+    - "10101-10201:10000-10100/udp"  # RTP
     privileged: true
     volumes:
-    # - D:\projects\python3\ceph\ceph-asterisk5\ceph-asterisk\asterisk_configs\test_ats3:/etc/asterisk:rw
-    # - D:\projects\python3\ceph\ceph-asterisk5\ceph-asterisk\asterisk_configs\test_ats3\sounds:/var/lib/asterisk/sounds/en:ro
-    - ./asterisk_configs/test_ats3:/etc/asterisk:rw
-    - ./asterisk_configs/test_ats3/sounds:/var/lib/asterisk/sounds/en:ro
-    - ./asterisk_configs/test_ats3/drivers/odbc.ini:/etc/odbc.ini
-    - ./asterisk_configs/test_ats3/drivers/odbcinst.ini:/etc/odbcinst.ini
+    - ./asterisk_configs/asterisk-test_ats4:/etc/asterisk:rw
+    - ./asterisk_configs/asterisk-test_ats4/sounds:/var/lib/asterisk/sounds/en:ro
+    - ./asterisk_configs/asterisk-test_ats4/drivers/odbc.ini:/etc/odbc.ini
+    - ./asterisk_configs/asterisk-test_ats4/drivers/odbcinst.ini:/etc/odbcinst.ini
 version: '3.8'

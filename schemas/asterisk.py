@@ -59,6 +59,8 @@ class AsteriskInstanceCreate(BaseModel):
     name: str
     sip_port: int
     http_port: int
+    rtp_port_start:int
+    rtp_port_end:int
 
 
 class AsteriskInstanceResponse(BaseModel):
@@ -66,6 +68,8 @@ class AsteriskInstanceResponse(BaseModel):
     name: str
     sip_port: int
     http_port: int
+    rtp_port_start:int
+    rtp_port_end:int
     status: str
 
     class Config:

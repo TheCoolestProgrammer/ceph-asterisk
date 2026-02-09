@@ -3,17 +3,33 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Config(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env")
+    model_config = SettingsConfigDict(env_file=".env",extra='ignore')
     HOSTNAME:str
     MYSQL_DATABASE:str
+    MYSQL_DATABASE_CDR:str
     MYSQL_USER:str
     MYSQL_PASSWORD:str
+    MYSQL_ASTERISK_USER:str
+    MYSQL_ASTERISK_USER_PASSWORD:str
     MYSQL_PORT:int
+    MYSQL_CONTAINER_NAME:str
+    MYSQL_CDR_TABLE:str
+
+    ASTERISK_IMAGE_TAG:str
+    ASTERISK_IMAGE_PATH:str
+    
+    ASTERISK_ODBC_ID:str
+    DSN:str
 
     @computed_field
     @property
     def DATABASE_URL(self)->str:
         return f"mysql+pymysql://{self.MYSQL_USER}:{self.MYSQL_PASSWORD}@{self.HOSTNAME}/{self.MYSQL_DATABASE}"
+ 
+    @computed_field
+    @property
+    def DATABASE_CDR_URL(self)->str:
+        return f"mysql+pymysql://{self.MYSQL_ASTERISK_USER}:{self.MYSQL_ASTERISK_USER_PASSWORD}@{self.HOSTNAME}/{self.MYSQL_DATABASE_CDR}"
  
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 20
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
