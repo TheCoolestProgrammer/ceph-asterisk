@@ -1,14 +1,21 @@
+from enum import Enum
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
+class CDRState(str, Enum):
+    ON = "yes"
+    OFF = "no"
+
+class ChangeCDRStatus(BaseModel):
+    instance_name:str
+    enabled: CDRState
 
 class AsteriskInstanceUpdate(BaseModel):
     name: Optional[str] = None
     sip_port: Optional[int] = None
     http_port: Optional[int] = None
     status: Optional[str] = None
-
 
 class CDRGet(BaseModel):
     instance_name: Optional[str] = (None,)
@@ -61,6 +68,7 @@ class AsteriskInstanceCreate(BaseModel):
     http_port: int
     rtp_port_start:int
     rtp_port_end:int
+    ami_port:int
 
 
 class AsteriskInstanceResponse(BaseModel):

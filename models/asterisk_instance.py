@@ -12,5 +12,6 @@ class AsteriskInstance(Base):
     http_port = Column(Integer, unique=True)
     rtp_port_start = Column(Integer, unique=True, default=10000)
     rtp_port_end = Column(Integer, unique=True, default=10010)
+    ami_port = Column(Integer, unique=True, default=5038)
     config_path = Column(Text)
     status = Column(String(20), default="stopped")

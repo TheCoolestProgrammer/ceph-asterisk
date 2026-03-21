@@ -1,0 +1,20 @@
+FROM python:3.11-slim
+
+# Установка uv
+RUN pip install uv
+
+# Создание рабочей директории
+WORKDIR /app
+
+# Копирование файлов проекта для установки зависимостей
+COPY pyproject.toml uv.lock* README.md ./
+
+# Создание виртуального окружения и установка зависимостей через uv sync
+RUN uv venv && \
+    uv sync
+
+# Копирование остальных файлов (будет перезаписано volume в dev режиме)
+COPY . .
+
+# Команда по умолчанию (переопределяется в docker-compose)
+CMD ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,3 +1,5 @@
+import asyncio
+
 import docker
 import os
 import shutil
@@ -13,11 +15,66 @@ from schemas.asterisk import (
     AsteriskInstanceCreate,
     AsteriskInstanceResponse,
     AsteriskInstanceUpdate,
+    ChangeCDRStatus,
+    CDRState,
 )
 from sqlalchemy.orm import Session
+from sqlalchemy import select
+from panoramisk import Manager
 
 router = APIRouter(prefix="/instances")
 
+async def send_ami_command(command: str, instance_name:str, db: SessionLocal = Depends(get_db)):
+    # stmt = select(AsteriskInstance).where(AsteriskInstance.name==instance_name)
+    # result = session.execute(stmt)
+    instance = db.query(AsteriskInstance).filter(AsteriskInstance.name==instance_name).first()
+
+    manager = Manager(
+        host="asterisk-"+instance.name, 
+        port=instance.ami_port, 
+        username=config.MYSQL_ASTERISK_USER, 
+        secret=config.MYSQL_ASTERISK_USER_PASSWORD
+    )
+    try:
+        await manager.connect()
+        print("____connected____")
+        # Выполняем команду
+        # response = await manager.send_action({'Action': 'Command', 'Command': command})
+        response = await asyncio.wait_for(
+            manager.send_action({'Action': 'Command', 'Command': command}), 
+            timeout=5.0
+        )
+        manager.close() 
+        
+        return response
+    except Exception as e:
+        # Важно закрыть соединение даже при ошибке, если оно успело открыться
+        if manager:
+            manager.close()
+        raise HTTPException(status_code=500, detail=f"AMI Error: {str(e)}")
+
+
+@router.post("/cdr_change_status")
+async def set_cdr_status(status: ChangeCDRStatus, db: SessionLocal = Depends(get_db)):
+    # Включаем или выключаем запись CDR на лету
+    # Команда 'cdr set debug off/on' — самый быстрый способ
+    action = CDRState.ON if status.enabled else CDRState.OFF
+    
+    # Мы можем либо менять статус через debug, 
+    # либо через полноценный reload модуля (если вы правили конфиг программно)
+    cmd = f"cdr set core channeldefaultenabled {action}" 
+    
+    # Если вы всё же хотите править конфиг и делать reload:
+    # 1. Сначала ваш код правит файл cdr.conf
+    # 2. Потом cmd = "cdr reload"
+    
+    response = await send_ami_command(cmd, status.instance_name, db)
+    
+    return {
+        "status": "success", 
+        "cdr_enabled": status.enabled,
+        "asterisk_response": response.content
+    }
 
 @router.get("", response_model=list[AsteriskInstanceResponse])
 def list_instances(db: SessionLocal = Depends(get_db)):
@@ -59,6 +116,7 @@ async def create_instance(
             | (AsteriskInstance.http_port == instance.http_port)
             | (AsteriskInstance.rtp_port_start==instance.rtp_port_start)
             | (AsteriskInstance.rtp_port_end==instance.rtp_port_end)
+            | (AsteriskInstance.ami_port==instance.ami_port)
         )
         .first()
     ):
@@ -81,6 +139,7 @@ async def create_instance(
             http_port=instance.http_port,
             rtp_port_start=instance.rtp_port_start,
             rtp_port_end=instance.rtp_port_end,
+            ami_port=instance.ami_port,
             config_path=config_dir,
             status="creating",
         )
@@ -384,20 +443,6 @@ loguserfield=yes
             ;    table={config.MYSQL_CDR_TABLE}
 
             """,
-        #TODO: скорее всего этот файл не работает, нужно прочекать и в случае чего удалить 
-        # "cdr_mysql.conf": f"""
-            # [global]
-            #     hostname={config.HOSTNAME}
-            #     dbname={config.MYSQL_DATABASE}
-            #     password={config.MYSQL_PASSWORD}
-            #     user={config.MYSQL_USER}
-            #     port={config.MYSQL_PORT}
-
-            # [{config.ASTERISK_ODBC_ID}]
-            #     table={config.MYSQL_CDR_TABLE}
-            #     ;timezone=UTC
-            
-            # """,
         "./drivers/odbc.ini":f"""[{config.DSN}]
 Description = MySQL connection to Asterisk
 Driver      = MySQL
@@ -423,17 +468,26 @@ pre-connect => yes
 connection={config.ASTERISK_ODBC_ID}  ; Имя из res_odbc.conf
 table={config.MYSQL_CDR_TABLE}              ; Имя таблицы в БД
             """,
-        
+        "manager.conf":f"""
+[general]
+enabled = yes
+port = {instance.ami_port}
+bindaddr = 0.0.0.0
+
+[{config.MYSQL_ASTERISK_USER}]
+secret = {config.MYSQL_ASTERISK_USER_PASSWORD}
+read = system,call,config
+write = system,call,config,command
+        """, 
     }
-    ASTERISK_UID = 1000 
-    ASTERISK_GID = 1000
+    
     for filename, content in configs.items():
         filepath = os.path.join(config_dir, filename)
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
         # Устанавливаем правильные права
         os.chmod(filepath, 0o777)
-        os.chown(filepath, ASTERISK_UID, ASTERISK_GID)
+        os.chown(filepath, config.ASTERISK_UID, config.ASTERISK_GID)
         # try:
         #     os.chown(filepath, 0, 0)
         # except PermissionError:
@@ -542,7 +596,8 @@ def start_asterisk_container(instance: AsteriskInstance, db: Session):
                 "ports": [
                     f"{instance.sip_port}:{instance.sip_port}/udp",
                     f"{instance.http_port}:{instance.http_port}/tcp",
-                    f"{instance.rtp_port_start}-{instance.rtp_port_end}:{instance.rtp_port_start}-{instance.rtp_port_end}/udp"
+                    f"{instance.rtp_port_start}-{instance.rtp_port_end}:{instance.rtp_port_start}-{instance.rtp_port_end}/udp",
+                    f'{instance.ami_port}:{instance.ami_port}',
                 ],
                 "volumes": [
                     f"{os.path.abspath(instance.config_path)}:/etc/asterisk:rw",
