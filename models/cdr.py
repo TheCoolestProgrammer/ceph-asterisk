@@ -21,6 +21,6 @@ class CDR(BaseCDR):
     billsec = Column(Integer, default=0)
     disposition = Column(String(45), default='')
     amaflags = Column(Integer, default=0)
-    uniqueid = Column(String(150), primary_key=True, default='')
+    uniqueid = Column(String(150), primary_key=True, default='') #dbname
     userfield = Column(String(255), default='')
     sequence = Column(Integer, default=0)

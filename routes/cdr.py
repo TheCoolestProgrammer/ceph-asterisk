@@ -4,14 +4,16 @@ from typing import Optional
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
 
-from database import get_db
+from database import get_db, get_cdr_db
 from schemas.asterisk import ActiveCall, CDRGet, CDRRecord
 from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/cdr")
 
 
-@router.get("", response_model=list[CDRRecord])
+@router.get("" 
+            # response_model=list[CDRRecord]
+            )
 async def get_cdr_history(
     instance_name: Optional[str] = None,
     src: Optional[str] = None,
@@ -20,35 +22,35 @@ async def get_cdr_history(
     date_to: Optional[str] = None,
     limit: int = 100,
     offset: int = 0,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_cdr_db),
 ):
     """Получение истории звонков с фильтрацией"""
-    query = "SELECT * FROM cdr WHERE 1=1"
+    query = "SELECT * FROM asterisk_cdr WHERE 1=1"
     params = {}
 
     if instance_name:
-        query += " AND instance_name = :instance_name"
-        params["instance_name"] = instance_name
+        query += " AND uniqueid LIKE :instance_name "
+        params["instance_name"] = f"%{instance_name}%"
 
-    if src:
-        query += " AND src LIKE :src"
-        params["src"] = f"%{src}%"
+    # if src:
+    #     query += " AND src LIKE :src"
+    #     params["src"] = f"%{src}%"
 
-    if dst:
-        query += " AND dst LIKE :dst"
-        params["dst"] = f"%{dst}%"
+    # if dst:
+    #     query += " AND dst LIKE :dst"
+    #     params["dst"] = f"%{dst}%"
 
-    if date_from:
-        query += " AND calldate >= :date_from"
-        params["date_from"] = date_from
+    # if date_from:
+    #     query += " AND start >= :date_from"
+    #     params["date_from"] = date_from
 
-    if date_to:
-        query += " AND calldate <= :date_to"
-        params["date_to"] = date_to
+    # if date_to:
+    #     query += " AND end <= :date_to"
+    #     params["date_to"] = date_to
 
-    query += " ORDER BY calldate DESC LIMIT :limit OFFSET :offset"
-    params["limit"] = limit
-    params["offset"] = offset
+    # query += " ORDER BY start DESC LIMIT :limit OFFSET :offset"
+    # params["limit"] = limit
+    # params["offset"] = offset
 
     result = db.execute(text(query), params)
     records = result.fetchall()

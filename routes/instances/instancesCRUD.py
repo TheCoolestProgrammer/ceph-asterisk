@@ -123,7 +123,9 @@ async def create_instance(
         raise HTTPException(status_code=400, detail="Ports already in use")
 
     # Create config directory
-    config_dir = f"./asterisk_configs/{instance.name}"
+    # host_path = os.getenv("HOST_PROJECT_PATH")
+    config_dir= f"/app/asterisk_configs/{instance.name}"
+    # config_dir = f"./asterisk_configs/{instance.name}"
     os.makedirs(config_dir, exist_ok=True)
     os.chmod(config_dir, 0o777)
     os.makedirs(f"{config_dir}/drivers", exist_ok=True)
@@ -318,7 +320,7 @@ def create_default_configs(config_dir: str, instance: AsteriskInstanceCreate):
     # os.makedirs(config_dir, exist_ok=True)
 
     configs = {
-        "asterisk.conf": f"""[directories]
+        f"asterisk.conf": f"""[directories]
 astetcdir => /etc/asterisk
 astmoddir => /usr/lib/asterisk/modules
 astvarlibdir => /var/lib/asterisk
@@ -443,7 +445,7 @@ loguserfield=yes
             ;    table={config.MYSQL_CDR_TABLE}
 
             """,
-        "./drivers/odbc.ini":f"""[{config.DSN}]
+        "drivers/odbc.ini":f"""[{config.DSN}]
 Description = MySQL connection to Asterisk
 Driver      = MySQL
 Database    = {config.MYSQL_DATABASE_CDR}
@@ -452,7 +454,7 @@ User        = {config.MYSQL_ASTERISK_USER}
 Password    = {config.MYSQL_ASTERISK_USER_PASSWORD}
 Port        = {config.MYSQL_PORT}
         """,
-        "./drivers/odbcinst.ini":f"""[MySQL]
+        "drivers/odbcinst.ini":f"""[MySQL]
 Description = ODBC for MySQL
 Driver      = /usr/lib/x86_64-linux-gnu/odbc/libmaodbc.so
 FileUsage   = 1
@@ -587,11 +589,17 @@ def start_asterisk_container_by_library(instance: AsteriskInstance, db: Session)
 
 def start_asterisk_container(instance: AsteriskInstance, db: Session):
     # Create docker-compose.yml
+    # host_path = os.getenv("HOST_PROJECT_PATH")
+
+
     compose_config = {
         "version": "3.8",
         "services": {
             f"{instance.name}": {
-                "build": ".",
+                "build": {
+                    "context": f"/app/docker-compose/", # Путь на хосте
+                    "dockerfile": "dockerfile" # Убедитесь, что путь верный
+                },
                 "container_name": f"asterisk-{instance.name}",
                 "ports": [
                     f"{instance.sip_port}:{instance.sip_port}/udp",
@@ -600,10 +608,16 @@ def start_asterisk_container(instance: AsteriskInstance, db: Session):
                     f'{instance.ami_port}:{instance.ami_port}',
                 ],
                 "volumes": [
-                    f"{os.path.abspath(instance.config_path)}:/etc/asterisk:rw",
-                    f"{os.path.abspath(instance.config_path)}/sounds:/var/lib/asterisk/sounds/en:ro",
-                    f"{os.path.abspath(instance.config_path)}/drivers/odbc.ini:/etc/odbc.ini",
-                    f"{os.path.abspath(instance.config_path)}/drivers/odbcinst.ini:/etc/odbcinst.ini"
+                    # "shared_configs:/app/asterisk_configs:rw",
+                    # f"{instance.config_path}:/etc/asterisk:rw",
+                    # f"{instance.config_path}/sounds:/var/lib/asterisk/sounds/en:ro",
+                    # f"{instance.config_path}/drivers/odbc.ini:/etc/odbc.ini",
+                    # f"{instance.config_path}/drivers/odbcinst.ini:/etc/odbcinst.ini"
+                    f"/home/vasya/ceph-asterisk/asterisk_configs/{instance.name}:/etc/asterisk:rw",
+                    f"/home/vasya/ceph-asterisk/asterisk_configs/{instance.name}/sounds:/var/lib/asterisk/sounds/en:ro",
+                    f"/home/vasya/ceph-asterisk/asterisk_configs/{instance.name}/drivers/odbc.ini:/etc/odbc.ini",
+                    f"/home/vasya/ceph-asterisk/asterisk_configs/{instance.name}/drivers/odbcinst.ini:/etc/odbcinst.ini"
+                
                 ],
                 "networks": ["ceph-asterisk_default"],
                 "privileged": True,
@@ -614,10 +628,15 @@ def start_asterisk_container(instance: AsteriskInstance, db: Session):
             "ceph-asterisk_default": {
                 "external": True
             }
-        }
+        },
+        # "volumes":{
+        #     "shared_configs":{
+        #         "external":True
+        #     }
+        # }
     }
 
-    compose_path = f"./docker-compose/"
+    compose_path = f"/app/docker-compose/"
     os.makedirs(compose_path, exist_ok=True)
 
     filename = f"docker-compose-{instance.name}.yml"

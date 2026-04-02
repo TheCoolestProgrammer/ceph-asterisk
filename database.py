@@ -18,3 +18,9 @@ def get_db():
         yield db
     finally:
         db.close()
+def get_cdr_db():
+    db = SessionCDR()
+    try:
+        yield db
+    finally:
+        db.close()
