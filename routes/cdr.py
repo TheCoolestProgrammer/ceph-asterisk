@@ -1,61 +1,44 @@
 from datetime import datetime, timedelta
 import random
 from typing import Optional
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, status
 from sqlalchemy import text
 
 from database import get_db, get_cdr_db
 from schemas.asterisk import ActiveCall, CDRGet, CDRRecord
 from sqlalchemy.orm import Session
+from models.cdr import CDR
+from schemas.cdr import CDRRecord, CDRInputData
 
 router = APIRouter(prefix="/cdr")
 
 
-@router.get("" 
-            # response_model=list[CDRRecord]
-            )
+@router.get("/", response_model=list[CDRRecord])
 async def get_cdr_history(
-    instance_name: Optional[str] = None,
-    src: Optional[str] = None,
-    dst: Optional[str] = None,
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
-    limit: int = 100,
-    offset: int = 0,
+    data:CDRInputData,
     db: Session = Depends(get_cdr_db),
 ):
-    """Получение истории звонков с фильтрацией"""
-    query = "SELECT * FROM asterisk_cdr WHERE 1=1"
-    params = {}
+    query = db.query(CDR)
+    if data.instance_name:
+        query = query.filter(CDR.uniqueid.like(f"%{data.instance_name}%"))
+    
+    if data.src:
+        query = query.filter(CDR.src.like(f"%{data.src}%"))
+    
+    if data.dst:
+        query = query.filter(CDR.dst.like(f"%{data.dst}%"))
+        
+    if data.date_from:
+        query = query.filter(CDR.start >= data.date_from)
+        
+    if data.date_to:
+        query = query.filter(CDR.end <= data.date_to)
 
-    if instance_name:
-        query += " AND uniqueid LIKE :instance_name "
-        params["instance_name"] = f"%{instance_name}%"
+    return query.order_by(CDR.start.desc())\
+                .limit(data.limit)\
+                .offset(data.offset)\
+                .all()
 
-    # if src:
-    #     query += " AND src LIKE :src"
-    #     params["src"] = f"%{src}%"
-
-    # if dst:
-    #     query += " AND dst LIKE :dst"
-    #     params["dst"] = f"%{dst}%"
-
-    # if date_from:
-    #     query += " AND start >= :date_from"
-    #     params["date_from"] = date_from
-
-    # if date_to:
-    #     query += " AND end <= :date_to"
-    #     params["date_to"] = date_to
-
-    # query += " ORDER BY start DESC LIMIT :limit OFFSET :offset"
-    # params["limit"] = limit
-    # params["offset"] = offset
-
-    result = db.execute(text(query), params)
-    records = result.fetchall()
-
-    return [row_to_dict(record) for record in records]
 
 
 def row_to_dict(row):
@@ -68,38 +51,44 @@ def row_to_dict(row):
         return dict(row)
 
 
-@router.get("active/", response_model=list[ActiveCall])
+@router.get("/active/"
+            # response_model=list[ActiveCall]
+            )
 async def get_active_calls(
     instance_name: Optional[str] = None, db: Session = Depends(get_db)
 ):
-    """Получение списка активных звонков"""
-    query = "SELECT * FROM active_calls WHERE 1=1"
-    params = {}
+    #TODO: переписать роут так, чтобы он обращался к ARI/AMI
 
-    if instance_name:
-        query += " AND instance_name = :instance_name"
-        params["instance_name"] = instance_name
+    return status.HTTP_404_NOT_FOUND
 
-    result = db.execute(text(query), params)
-    calls = result.fetchall()
+    # """Получение списка активных звонков"""
+    # query = "SELECT * FROM active_calls WHERE 1=1"
+    # params = {}
 
-    return [row_to_dict(call) for call in calls]
+    # if instance_name:
+    #     query += " AND instance_name = :instance_name"
+    #     params["instance_name"] = instance_name
+
+    # result = db.execute(text(query), params)
+    # calls = result.fetchall()
+
+    # return [row_to_dict(call) for call in calls]
 
 
-@router.get("stats/")
+@router.get("/stats/")
 async def get_call_stats(
     instance_name: str,
     period: str = "day",  # day, week, month
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_cdr_db),
 ):
     """Получение статистики звонков"""
 
     if period == "day":
-        interval = "1 DAY"
+        interval = 1
     elif period == "week":
-        interval = "7 DAY"
+        interval = 7
     else:
-        interval = "30 DAY"
+        interval = 30
 
     query = (
         """
@@ -114,16 +103,17 @@ async def get_call_stats(
         COUNT(CASE WHEN disposition = 'NO ANSWER' THEN 1 END) as no_answer_calls,
         COUNT(CASE WHEN disposition = 'BUSY' THEN 1 END) as busy_calls,
         COUNT(CASE WHEN disposition = 'FAILED' THEN 1 END) as failed_calls
-    FROM cdr 
-    WHERE instance_name = :instance_name 
-    AND calldate >= NOW() - INTERVAL """
-        + interval
-        + """
+    FROM asterisk_cdr 
+    WHERE uniqueid like :instance_name 
+    AND start >= DATE_SUB(NOW(), INTERVAL :interval DAY)
     GROUP BY disposition
     """
     )
-
-    result = db.execute(text(query), {"instance_name": instance_name})
+    params = {
+        "instance_name":f"%{instance_name}%",
+        "interval":interval
+    }
+    result = db.execute(text(query), params)
     stats = result.fetchall()
 
     return {
@@ -133,62 +123,65 @@ async def get_call_stats(
     }
 
 
-@router.post("simulate/")
+@router.post("/simulate/")
 async def simulate_calls(
     instance_name: str, count: int = 5, db: Session = Depends(get_db)
 ):
-    """Симуляция тестовых звонков"""
+    #TODO: переписать!
 
-    extensions = ["6001", "6002", "6003", "6004", "6005"]
-    dispositions = ["ANSWERED", "NO ANSWER", "BUSY", "FAILED"]
+    return status.HTTP_404_NOT_FOUND
+    # """Симуляция тестовых звонков"""
 
-    simulated_calls = []
+    # extensions = ["6001", "6002", "6003", "6004", "6005"]
+    # dispositions = ["ANSWERED", "NO ANSWER", "BUSY", "FAILED"]
 
-    for i in range(count):
-        # Генерируем случайные данные звонка
-        call_date = datetime.now() - timedelta(hours=random.randint(0, 24 * 7))
-        src = random.choice(extensions)
-        dst = random.choice([e for e in extensions if e != src])
-        duration = random.randint(0, 300)
-        billsec = random.randint(0, duration)
-        disposition = random.choice(dispositions)
+    # simulated_calls = []
 
-        # Вставляем тестовый CDR
-        query = """
-        INSERT INTO cdr 
-        (calldate, clid, src, dst, dcontext, channel, dstchannel, lastapp, lastdata, 
-         duration, billsec, disposition, amaflags, accountcode, uniqueid, userfield, instance_name)
-        VALUES 
-        (:calldate, :clid, :src, :dst, :dcontext, :channel, :dstchannel, :lastapp, :lastdata,
-         :duration, :billsec, :disposition, :amaflags, :accountcode, :uniqueid, :userfield, :instance_name)
-        """
+    # for i in range(count):
+    #     # Генерируем случайные данные звонка
+    #     call_date = datetime.now() - timedelta(hours=random.randint(0, 24 * 7))
+    #     src = random.choice(extensions)
+    #     dst = random.choice([e for e in extensions if e != src])
+    #     duration = random.randint(0, 300)
+    #     billsec = random.randint(0, duration)
+    #     disposition = random.choice(dispositions)
 
-        params = {
-            "calldate": call_date,
-            "clid": f'"{random.choice(["John", "Jane", "Mike", "Sarah"])}" <{src}>',
-            "src": src,
-            "dst": dst,
-            "dcontext": "local",
-            "channel": f"SIP/{src}-0000000{random.randint(1, 9)}",
-            "dstchannel": f"SIP/{dst}-0000000{random.randint(1, 9)}",
-            "lastapp": "Dial",
-            "lastdata": f"SIP/{dst},20",
-            "duration": duration,
-            "billsec": billsec,
-            "disposition": disposition,
-            "amaflags": 0,
-            "accountcode": "",
-            "uniqueid": f"{int(call_date.timestamp())}.{random.randint(1000, 9999)}",
-            "userfield": "simulated_call",
-            "instance_name": instance_name,
-        }
+    #     # Вставляем тестовый CDR
+    #     query = """
+    #     INSERT INTO cdr 
+    #     (calldate, clid, src, dst, dcontext, channel, dstchannel, lastapp, lastdata, 
+    #      duration, billsec, disposition, amaflags, accountcode, uniqueid, userfield, instance_name)
+    #     VALUES 
+    #     (:calldate, :clid, :src, :dst, :dcontext, :channel, :dstchannel, :lastapp, :lastdata,
+    #      :duration, :billsec, :disposition, :amaflags, :accountcode, :uniqueid, :userfield, :instance_name)
+    #     """
 
-        db.execute(text(query), params)
-        simulated_calls.append(params)
+    #     params = {
+    #         "calldate": call_date,
+    #         "clid": f'"{random.choice(["John", "Jane", "Mike", "Sarah"])}" <{src}>',
+    #         "src": src,
+    #         "dst": dst,
+    #         "dcontext": "local",
+    #         "channel": f"SIP/{src}-0000000{random.randint(1, 9)}",
+    #         "dstchannel": f"SIP/{dst}-0000000{random.randint(1, 9)}",
+    #         "lastapp": "Dial",
+    #         "lastdata": f"SIP/{dst},20",
+    #         "duration": duration,
+    #         "billsec": billsec,
+    #         "disposition": disposition,
+    #         "amaflags": 0,
+    #         "accountcode": "",
+    #         "uniqueid": f"{int(call_date.timestamp())}.{random.randint(1000, 9999)}",
+    #         "userfield": "simulated_call",
+    #         "instance_name": instance_name,
+    #     }
 
-    db.commit()
+    #     db.execute(text(query), params)
+    #     simulated_calls.append(params)
 
-    return {
-        "message": f"Simulated {count} calls for {instance_name}",
-        "simulated_calls": simulated_calls,
-    }
+    # db.commit()
+
+    # return {
+    #     "message": f"Simulated {count} calls for {instance_name}",
+    #     "simulated_calls": simulated_calls,
+    # }
