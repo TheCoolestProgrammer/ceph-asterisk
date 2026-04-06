@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 router = APIRouter(prefix="/instances/{instance_id}/users")
 
 
-@router.get("{user_id}", response_model=SIPUserResponse)
+@router.get("/{user_id}", response_model=SIPUserResponse)
 async def get_sip_user(instance_id: int, user_id: int, db: Session = Depends(get_db)):
     """Получение конкретного SIP пользователя"""
     instance = (
@@ -33,7 +33,7 @@ async def get_sip_user(instance_id: int, user_id: int, db: Session = Depends(get
     return user
 
 
-@router.put("{user_id}", response_model=SIPUserResponse)
+@router.put("/{user_id}", response_model=SIPUserResponse)
 async def update_sip_user(
     instance_id: int,
     user_id: int,
@@ -71,7 +71,7 @@ async def update_sip_user(
     return user
 
 
-@router.delete("{user_id}")
+@router.delete("/{user_id}")
 async def delete_sip_user(
     instance_id: int, user_id: int, db: Session = Depends(get_db)
 ):
@@ -221,7 +221,7 @@ async def reload_asterisk_sip(instance_name: str):
         print(f"Error reloading SIP for {instance_name}: {e}")
 
 
-@router.get("", response_model=list[SIPUserResponse])
+@router.get("/", response_model=list[SIPUserResponse])
 async def get_sip_users(instance_id: int, db: Session = Depends(get_db)):
     """Получение списка SIP пользователей инстанса"""
     instance = (
@@ -234,7 +234,7 @@ async def get_sip_users(instance_id: int, db: Session = Depends(get_db)):
     return users
 
 
-@router.post("", response_model=SIPUserResponse)
+@router.post("/", response_model=SIPUserResponse)
 async def create_sip_user(
     instance_id: int, user: SIPUserCreate, db: Session = Depends(get_db)
 ):

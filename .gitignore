@@ -10,9 +10,8 @@ wheels/
 .venv
 
 asterisk_configs/
-docker-compose/
-docker-compose.yaml
-
+docker-compose/*
+!docker-compose/dockerfile
 #docker - ceph
 etc/
 srv/

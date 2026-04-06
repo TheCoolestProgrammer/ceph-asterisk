@@ -19,6 +19,10 @@ class Config(BaseSettings):
     ASTERISK_IMAGE_TAG:str
     ASTERISK_IMAGE_PATH:str
     
+    PROJECT_PATH:str
+    CONFIG_FOLDER:str
+    COMPOSE_FOLDER:str
+    
     ASTERISK_ODBC_ID:str
     DSN:str
 

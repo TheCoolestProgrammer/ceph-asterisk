@@ -20,9 +20,42 @@ from schemas.asterisk import (
 )
 from sqlalchemy.orm import Session
 from sqlalchemy import select
-from panoramisk import Manager
+from panoramisk import Manager, Message
 
 router = APIRouter(prefix="/instances")
+
+async def unload_module(modlue: str, instance_name:str, db: SessionLocal = Depends(get_db)):
+    # stmt = select(AsteriskInstance).where(AsteriskInstance.name==instance_name)
+    # result = session.execute(stmt)
+    instance = db.query(AsteriskInstance).filter(AsteriskInstance.name==instance_name).first()
+
+    manager = Manager(
+        host="asterisk-"+instance.name, 
+        port=instance.ami_port, 
+        username=config.MYSQL_ASTERISK_USER, 
+        secret=config.MYSQL_ASTERISK_USER_PASSWORD,
+        ssl=False,
+        encoding='utf8'
+    )
+    try:
+        await manager.connect()
+        
+        # Передаем словарь явно. Action — ключ, Command — доп. поле.
+        # action = {'Action': 'ModuleUnload', 'Module': modlue}
+        action = {"Action":"ListCommands"}
+        response = await asyncio.wait_for(
+            manager.send_action(action), 
+            timeout=5.0
+        )
+        for line in response.iter_lines():
+            print(response.content)
+        
+        manager.close() 
+        return response
+    except Exception as e:
+        if manager: manager.close()
+        raise HTTPException(status_code=500, detail=f"AMI Error: {str(e)}")
+
 
 async def send_ami_command(command: str, instance_name:str, db: SessionLocal = Depends(get_db)):
     # stmt = select(AsteriskInstance).where(AsteriskInstance.name==instance_name)
@@ -33,24 +66,27 @@ async def send_ami_command(command: str, instance_name:str, db: SessionLocal = D
         host="asterisk-"+instance.name, 
         port=instance.ami_port, 
         username=config.MYSQL_ASTERISK_USER, 
-        secret=config.MYSQL_ASTERISK_USER_PASSWORD
+        secret=config.MYSQL_ASTERISK_USER_PASSWORD,
+        ssl=False,
+        encoding='utf8'
     )
     try:
         await manager.connect()
-        print("____connected____")
-        # Выполняем команду
-        # response = await manager.send_action({'Action': 'Command', 'Command': command})
+        
+        # Передаем словарь явно. Action — ключ, Command — доп. поле.
+        action = {'Action': 'Command', 'Command': command}
+        
         response = await asyncio.wait_for(
-            manager.send_action({'Action': 'Command', 'Command': command}), 
+            manager.send_action(action), 
             timeout=5.0
         )
-        manager.close() 
+        for line in response.iter_lines():
+            print(response.content)
         
+        manager.close() 
         return response
     except Exception as e:
-        # Важно закрыть соединение даже при ошибке, если оно успело открыться
-        if manager:
-            manager.close()
+        if manager: manager.close()
         raise HTTPException(status_code=500, detail=f"AMI Error: {str(e)}")
 
 
@@ -62,26 +98,29 @@ async def set_cdr_status(status: ChangeCDRStatus, db: SessionLocal = Depends(get
     
     # Мы можем либо менять статус через debug, 
     # либо через полноценный reload модуля (если вы правили конфиг программно)
-    cmd = f"cdr set core channeldefaultenabled {action}" 
     
+    # cmd = f"cdr set core channeldefaultenabled {action}" 
+    # cmd = "cdr show status"
+    # cmd = "module unload cdr_adaptive_odbc.so"
+    cmd = "config reload"
     # Если вы всё же хотите править конфиг и делать reload:
     # 1. Сначала ваш код правит файл cdr.conf
     # 2. Потом cmd = "cdr reload"
     
     response = await send_ami_command(cmd, status.instance_name, db)
-    
+    # response = await unload_module("cdr_adaptive_odbc.so",status.instance_name,db)
     return {
         "status": "success", 
         "cdr_enabled": status.enabled,
-        "asterisk_response": response.content
+        "asterisk_response": response
     }
 
-@router.get("", response_model=list[AsteriskInstanceResponse])
+@router.get("/", response_model=list[AsteriskInstanceResponse])
 def list_instances(db: SessionLocal = Depends(get_db)):
     return db.query(AsteriskInstance).all()
 
 
-@router.get("{instance_id}", response_model=AsteriskInstanceResponse)
+@router.get("/{instance_id}", response_model=AsteriskInstanceResponse)
 async def get_instance(instance_id: int, db: Session = Depends(get_db)):
     """Получение информации о конкретном экземпляре"""
     instance = (
@@ -92,7 +131,7 @@ async def get_instance(instance_id: int, db: Session = Depends(get_db)):
     return instance
 
 
-@router.post("", response_model=AsteriskInstanceResponse)
+@router.post("/", response_model=AsteriskInstanceResponse)
 async def create_instance(
     instance: AsteriskInstanceCreate,
     create_test_users: bool,
@@ -186,7 +225,7 @@ async def create_instance(
         )
 
 
-@router.put("{instance_id}", response_model=AsteriskInstanceResponse)
+@router.put("/{instance_id}", response_model=AsteriskInstanceResponse)
 async def update_instance(
     instance_id: int,
     instance_update: AsteriskInstanceUpdate,
@@ -239,7 +278,7 @@ async def update_instance(
     return instance
 
 
-@router.delete("{instance_id}")
+@router.delete("/{instance_id}")
 def delete_instance(instance_id: int, db: Session = Depends(get_db)):
     instance = (
         db.query(AsteriskInstance).filter(AsteriskInstance.id == instance_id).first()
@@ -249,12 +288,12 @@ def delete_instance(instance_id: int, db: Session = Depends(get_db)):
 
     try:
         # Stop and remove container
-        compose_path = f"./docker-compose/asterisk-{instance.name}"
-
+        compose_path = f"./docker-compose/"
+        filename = f"docker-compose-{instance.name}.yml"
         # Проверяем существование директории docker-compose перед удалением
         if os.path.exists(compose_path):
             result = subprocess.run(
-                ["docker-compose", "down"],
+                ["docker", "compose","-f", f"{filename}", "down","-v"],
                 cwd=compose_path,
                 capture_output=True,
                 text=True,
@@ -287,16 +326,17 @@ def delete_instance(instance_id: int, db: Session = Depends(get_db)):
         # Cleanup compose directory with error handling
         if os.path.exists(compose_path):
             try:
-                shutil.rmtree(compose_path)
-                print(f"Compose directory removed: {compose_path}")
+                os.remove(f"{compose_path}/{filename}")
+                # shutil.rmtree(compose_path)
+                print(f"Compose file removed: {filename}")
             except FileNotFoundError:
-                print(f"Compose directory already deleted: {compose_path}")
+                print(f"Compose file already deleted: {filename}")
             except Exception as e:
                 print(
-                    f"Warning: Could not remove compose directory {compose_path}: {e}"
+                    f"Warning: Could not remove compose file {filename}: {e}"
                 )
         else:
-            print(f"Compose directory not found: {compose_path}")
+            print(f"Compose file not found: {filename}")
 
         # Delete from database
         db.delete(instance)
@@ -608,15 +648,16 @@ def start_asterisk_container(instance: AsteriskInstance, db: Session):
                     f'{instance.ami_port}:{instance.ami_port}',
                 ],
                 "volumes": [
+                    
                     # "shared_configs:/app/asterisk_configs:rw",
                     # f"{instance.config_path}:/etc/asterisk:rw",
                     # f"{instance.config_path}/sounds:/var/lib/asterisk/sounds/en:ro",
                     # f"{instance.config_path}/drivers/odbc.ini:/etc/odbc.ini",
                     # f"{instance.config_path}/drivers/odbcinst.ini:/etc/odbcinst.ini"
-                    f"/home/vasya/ceph-asterisk/asterisk_configs/{instance.name}:/etc/asterisk:rw",
-                    f"/home/vasya/ceph-asterisk/asterisk_configs/{instance.name}/sounds:/var/lib/asterisk/sounds/en:ro",
-                    f"/home/vasya/ceph-asterisk/asterisk_configs/{instance.name}/drivers/odbc.ini:/etc/odbc.ini",
-                    f"/home/vasya/ceph-asterisk/asterisk_configs/{instance.name}/drivers/odbcinst.ini:/etc/odbcinst.ini"
+                    f"{config.PROJECT_PATH}/{config.CONFIG_FOLDER}/{instance.name}:/etc/asterisk:rw",
+                    f"{config.PROJECT_PATH}/{config.CONFIG_FOLDER}/{instance.name}/sounds:/var/lib/asterisk/sounds/en:ro",
+                    f"{config.PROJECT_PATH}/{config.CONFIG_FOLDER}/{instance.name}/drivers/odbc.ini:/etc/odbc.ini",
+                    f"{config.PROJECT_PATH}/{config.CONFIG_FOLDER}/{instance.name}/drivers/odbcinst.ini:/etc/odbcinst.ini"
                 
                 ],
                 "networks": ["ceph-asterisk_default"],
@@ -636,7 +677,7 @@ def start_asterisk_container(instance: AsteriskInstance, db: Session):
         # }
     }
 
-    compose_path = f"/app/docker-compose/"
+    compose_path = f"/app/{config.COMPOSE_FOLDER}/"
     os.makedirs(compose_path, exist_ok=True)
 
     filename = f"docker-compose-{instance.name}.yml"

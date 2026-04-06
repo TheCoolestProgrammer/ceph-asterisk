@@ -78,6 +78,7 @@ class AsteriskInstanceResponse(BaseModel):
     http_port: int
     rtp_port_start:int
     rtp_port_end:int
+    ami_port:int
     status: str
 
     class Config:
