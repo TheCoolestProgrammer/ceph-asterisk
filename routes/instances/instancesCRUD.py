@@ -126,6 +126,14 @@ async def set_cdr_status(status: ChangeCDRStatus, db: SessionLocal = Depends(get
         "asterisk_response": response
     }
 
+@router.post("/send_comand/{instance_name}")
+async def send_comand_route(comand: str, instance_name:str,  db: SessionLocal = Depends(get_db)):
+
+    response = await send_ami_command(comand, instance_name, db)
+    # response = await unload_module("cdr_adaptive_odbc.so",status.instance_name,db)
+    return response
+
+
 @router.get("/", response_model=list[AsteriskInstanceResponse])
 def list_instances(db: SessionLocal = Depends(get_db)):
     return db.query(AsteriskInstance).all()
