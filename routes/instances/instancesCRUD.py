@@ -89,6 +89,17 @@ async def send_ami_command(command: str, instance_name:str, db: SessionLocal = D
         if manager: manager.close()
         raise HTTPException(status_code=500, detail=f"AMI Error: {str(e)}")
 
+@router.get("/get_contexts/{instance_id}")
+async def get_contexts_route(instance_name:str, db: SessionLocal = Depends(get_db))->list[str]:
+    cmd = "dialplan show"
+    contexts=[]
+    response = await send_ami_command(cmd, instance_name, db)
+    for i in response.Output:
+        print(i)
+        if "Context" in i:
+            context_name = i.split("'")[1]
+            contexts.append(context_name)
+    return contexts
 
 @router.post("/cdr_change_status")
 async def set_cdr_status(status: ChangeCDRStatus, db: SessionLocal = Depends(get_db)):

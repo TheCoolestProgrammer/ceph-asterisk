@@ -63,3 +63,13 @@ class PjsipDomainAlias(BaseCDR):
     __tablename__ = 'ps_domain_aliases'
     id = Column(String(40), primary_key=True)
     domain = Column(String(80))
+
+class PJSIPPSEndpointIdIPS(BaseCDR):
+    """ip аддреса"""
+    __tablename__ = 'ps_endpoint_id_ips'
+    id = Column(String(255), primary_key=True)
+    endpoint = Column(String(40),default=None)
+    match = Column(String(80),default=None)
+    srv_lookups = Column(Enum(Choise), default=Choise.YES)
+    match_geader = Column(String(255),default=None)
+
