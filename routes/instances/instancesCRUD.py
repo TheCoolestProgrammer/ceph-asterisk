@@ -162,9 +162,8 @@ async def create_instance(
         raise HTTPException(status_code=400, detail="Ports already in use")
 
     # Create config directory
-    # host_path = os.getenv("HOST_PROJECT_PATH")
-    config_dir= f"/app/asterisk_configs/{instance.name}"
-    # config_dir = f"./asterisk_configs/{instance.name}"
+    config_dir= f"/app/{config.CONFIG_FOLDER}/{instance.name}"
+
     os.makedirs(config_dir, exist_ok=True)
     os.chmod(config_dir, 0o777)
     os.makedirs(f"{config_dir}/drivers", exist_ok=True)
@@ -288,7 +287,7 @@ def delete_instance(instance_id: int, db: Session = Depends(get_db)):
 
     try:
         # Stop and remove container
-        compose_path = f"./docker-compose/"
+        compose_path = f"./{config.COMPOSE_FOLDER}/"
         filename = f"docker-compose-{instance.name}.yml"
         # Проверяем существование директории docker-compose перед удалением
         if os.path.exists(compose_path):
@@ -337,6 +336,8 @@ def delete_instance(instance_id: int, db: Session = Depends(get_db)):
                 )
         else:
             print(f"Compose file not found: {filename}")
+
+        
 
         # Delete from database
         db.delete(instance)
@@ -637,8 +638,8 @@ def start_asterisk_container(instance: AsteriskInstance, db: Session):
         "services": {
             f"{instance.name}": {
                 "build": {
-                    "context": f"/app/docker-compose/", # Путь на хосте
-                    "dockerfile": "dockerfile" # Убедитесь, что путь верный
+                    "context": f"/app/{config.COMPOSE_FOLDER}",
+                    "dockerfile": "dockerfile" 
                 },
                 "container_name": f"asterisk-{instance.name}",
                 "ports": [
@@ -648,12 +649,6 @@ def start_asterisk_container(instance: AsteriskInstance, db: Session):
                     f'{instance.ami_port}:{instance.ami_port}',
                 ],
                 "volumes": [
-                    
-                    # "shared_configs:/app/asterisk_configs:rw",
-                    # f"{instance.config_path}:/etc/asterisk:rw",
-                    # f"{instance.config_path}/sounds:/var/lib/asterisk/sounds/en:ro",
-                    # f"{instance.config_path}/drivers/odbc.ini:/etc/odbc.ini",
-                    # f"{instance.config_path}/drivers/odbcinst.ini:/etc/odbcinst.ini"
                     f"{config.PROJECT_PATH}/{config.CONFIG_FOLDER}/{instance.name}:/etc/asterisk:rw",
                     f"{config.PROJECT_PATH}/{config.CONFIG_FOLDER}/{instance.name}/sounds:/var/lib/asterisk/sounds/en:ro",
                     f"{config.PROJECT_PATH}/{config.CONFIG_FOLDER}/{instance.name}/drivers/odbc.ini:/etc/odbc.ini",
@@ -664,17 +659,11 @@ def start_asterisk_container(instance: AsteriskInstance, db: Session):
                 "privileged": True,
             }
         },
-        # Добавляем этот блок:
         "networks": {
             "ceph-asterisk_default": {
                 "external": True
             }
         },
-        # "volumes":{
-        #     "shared_configs":{
-        #         "external":True
-        #     }
-        # }
     }
 
     compose_path = f"/app/{config.COMPOSE_FOLDER}/"
