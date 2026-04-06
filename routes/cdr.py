@@ -15,7 +15,7 @@ router = APIRouter(prefix="/cdr")
 
 @router.get("/", response_model=list[CDRRecord])
 async def get_cdr_history(
-    data:CDRInputData,
+    data:CDRInputData = Depends(),
     db: Session = Depends(get_cdr_db),
 ):
     query = db.query(CDR)

@@ -10,7 +10,7 @@ from config import config
 
 from database import SessionLocal, get_db
 from models.asterisk_instance import AsteriskInstance
-from models.sip_user import SIPUser
+# from models.sip_user import SIPUser
 from schemas.asterisk import (
     AsteriskInstanceCreate,
     AsteriskInstanceResponse,
@@ -208,7 +208,7 @@ async def create_instance(
             ]
 
             for user_data in test_users:
-                db_user = SIPUser(**user_data, instance_name=db_instance.name)
+                # db_user = SIPUser(**user_data, instance_name=db_instance.name)
                 db.add(db_user)
 
             db.commit()
@@ -397,10 +397,14 @@ load => codec_ulaw.so
 load => codec_alaw.so
 load => format_wav.so
 load => res_odbc.so
+load => res_config_odbc.so
 load => cdr_adaptive_odbc.so
             
             """,
-        "pjsip.conf": f"""[transport-udp]
+        "pjsip.conf": f"""[global]
+endpoint_identifier_order=username,ip,anonymous
+
+[transport-udp]
 type=transport
 protocol=udp
 bind=0.0.0.0:{instance.sip_port}
@@ -444,12 +448,11 @@ max_contacts=1
 
             """,
         "extensions.conf": """[from-internal]
-exten => 600,1,Answer()
-
-same => n,Echo()
+exten => _XXX,1,NoOp(Звонок на внутренний номер ${EXTEN})
+same => n,Answer()
+same => n, Echo()
 same => n,Hangup()
 
-exten => 101,1,Dial(PJSIP/101)
 [from-external]
 exten => 777,1,NoOp(Входящий звонок от клиента ${CALLERID(all)})
 same => n,Answer()
@@ -477,14 +480,6 @@ unanswered=yes
 usegmtime=yes
 loguniqueid=yes
 loguserfield=yes
-
-            ; CDR в MySQL (основной способ)
-            ;[mysql]
-            ;    dsn={config.ASTERISK_ODBC_ID}
-            ;    loguniqueid=yes
-            ;    loguserfield=yes
-            ;    table={config.MYSQL_CDR_TABLE}
-
             """,
         "drivers/odbc.ini":f"""[{config.DSN}]
 Description = MySQL connection to Asterisk
@@ -522,6 +517,30 @@ secret = {config.MYSQL_ASTERISK_USER_PASSWORD}
 read = system,call,config
 write = system,call,config,command
         """, 
+        "sorcery.conf":f"""[res_pjsip]
+endpoint=config,pjsip.conf
+endpoint=realtime,ps_endpoints
+auth=config,pjsip.conf
+auth=realtime,ps_auths
+aor=config,pjsip.conf
+aor=realtime,ps_aors
+contact=realtime,ps_contacts
+
+[res_pjsip_endpoint_identifier_ip]
+identify=config,pjsip.conf
+identify=realtime,ps_endpoint_id_ips
+[res_pjsip_endpoint_identifier_user]
+endpoint=realtime,ps_endpoints
+        """,
+        "extconfig.conf":f"""[settings]
+; имя_объекта => драйвер,имя_коннектора_из_res_odbc,имя_таблицы
+ps_endpoints => odbc,{config.ASTERISK_ODBC_ID},ps_endpoints
+ps_auths => odbc,{config.ASTERISK_ODBC_ID},ps_auths
+ps_aors => odbc,{config.ASTERISK_ODBC_ID},ps_aors
+ps_domain_aliases => odbc,{config.ASTERISK_ODBC_ID},ps_domain_aliases
+ps_endpoint_id_ips => odbc,{config.ASTERISK_ODBC_ID},ps_endpoint_id_ips
+ps_contacts => odbc,{config.ASTERISK_ODBC_ID},ps_contacts
+    """
     }
     
     for filename, content in configs.items():
