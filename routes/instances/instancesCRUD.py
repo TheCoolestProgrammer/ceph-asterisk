@@ -428,6 +428,7 @@ endpoint_identifier_order=username,ip,anonymous
 type=transport
 protocol={transport_type}
 bind=0.0.0.0:{instance.sip_port}
+{"async_operations=1" if transport_type=="tcp" else ""}
 [101]
 type=endpoint
 context=from-internal

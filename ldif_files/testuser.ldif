@@ -9,7 +9,7 @@ cn: Simple User
 displayName: Simple User
 uidNumber: 10002
 gidNumber: 10002
-userPassword: {SSHA}KLidKpMcsBydi0jdcnoVSgAAXpXfcUl/
+userPassword: {SSHA}Q1xGS+bx02kFr+8l2NWbRqoZ89/d08qH 
 homeDirectory: /home/simpleuser
 loginShell: /bin/bash
 mail: simpleuser@example.org

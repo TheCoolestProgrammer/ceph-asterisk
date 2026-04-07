@@ -10,7 +10,7 @@ from security import (
     get_password_hash,
     create_tokens,
     verify_token,
-    create_LDAP_tokens,
+    # create_LDAP_tokens,
 )
 from database import get_db
 from ldap_auth import ldap_auth
@@ -91,9 +91,22 @@ def login_LDAP(user_data: UserLogin, db: Session = Depends(get_db)):
             headers={"WWW-Authenticate": "Bearer"},
         )
     print(ldap_user)
-    # Создаем пару токенов
-    tokens = create_LDAP_tokens(email=ldap_user["email"], login=ldap_user["username"])
+    user = db.query(User).filter(User.login == user_data.login).first()
+    if not user:
+        hashed_password = get_password_hash(user_data.password)
+        user = User(
+            login=user_data.login,
+            password_hash=hashed_password,
+            name=ldap_user['username']
+        )
 
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        user = db.query(User).filter(User.login == user_data.login).first()
+
+    # Создаем пару токенов
+    tokens = create_tokens(user_id=user.id, login=user_data.login)
     return tokens
 
 

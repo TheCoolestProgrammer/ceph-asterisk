@@ -13,32 +13,36 @@ from schemas.cdr import CDRRecord, CDRInputData
 router = APIRouter(prefix="/cdr")
 
 
-@router.get("/", response_model=list[CDRRecord])
+@router.get("/",
+            #  response_model=list[CDRRecord]
+                )
 async def get_cdr_history(
     data:CDRInputData = Depends(),
     db: Session = Depends(get_cdr_db),
 ):
     query = db.query(CDR)
-    # if data.instance_name:
-    #     query = query.filter(CDR.uniqueid.like(f"%{data.instance_name}%"))
+    if data.instance_name:
+        query = query.filter(CDR.uniqueid.like(f"%{data.instance_name}%"))
     
-    # if data.src:
-    #     query = query.filter(CDR.src.like(f"%{data.src}%"))
+    if data.src:
+        query = query.filter(CDR.src.like(f"%{data.src}%"))
     
-    # if data.dst:
-    #     query = query.filter(CDR.dst.like(f"%{data.dst}%"))
+    if data.dst:
+        query = query.filter(CDR.dst.like(f"%{data.dst}%"))
         
-    # if data.date_from:
-    #     query = query.filter(CDR.start >= data.date_from)
+    if data.date_from:
+        query = query.filter(CDR.start >= data.date_from)
         
-    # if data.date_to:
-    #     query = query.filter(CDR.end <= data.date_to)
+    if data.date_to:
+        query = query.filter(CDR.end <= data.date_to)
 
-    return query.order_by(CDR.start.desc())\
+    res = query.order_by(CDR.start.desc())\
                 .limit(data.limit)\
                 .offset(data.offset)\
                 .all()
-
+    for i in res:
+        i.instance_name = i.uniqueid.split('-')[0]
+    return res
 
 
 def row_to_dict(row):

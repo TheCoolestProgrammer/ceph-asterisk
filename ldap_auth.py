@@ -24,7 +24,7 @@ class LDAPAuth:
                 config.LDAP_ADMIN_PASSWORD,
                 auto_bind=True,
             )
-
+            print(f"Searching with filter: {config.LDAP_SEARCH_FILTER.format(username=username)}")
             # 2. ищем пользователя
             admin_conn.search(
                 search_base=config.LDAP_SEARCH_BASE,
