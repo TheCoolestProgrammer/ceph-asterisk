@@ -15,3 +15,4 @@ class AsteriskInstance(Base):
     ami_port = Column(Integer, unique=True, default=5038)
     config_path = Column(Text)
     status = Column(String(20), default="stopped")
+    # create_date = Column()

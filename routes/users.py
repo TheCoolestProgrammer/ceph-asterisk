@@ -53,7 +53,8 @@ def create_sip_user(user_data: SIPUserCreate,
             id=user_data.username,
             aors=f"{user_data.username}-aor",
             auth=f"{user_data.username}-auth",
-            context=user_data.context
+            context=user_data.context,
+            transport=f"transport-{user_data.transport.value}"
         )
 
         cdr_db.add(new_aor)

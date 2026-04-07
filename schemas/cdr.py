@@ -27,7 +27,7 @@ class CDRRecord(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 class CDRInputData(BaseModel):
-    instance_name: str
+    # instance_name: str
     src: Optional[str] = None
     dst: Optional[str] = None
     date_from: Optional[str] = None

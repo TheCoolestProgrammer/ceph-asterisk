@@ -61,6 +61,10 @@ class CallFilter(BaseModel):
     limit: int = 100
     offset: int = 0
 
+class TransportType(str, Enum):
+    UDP="udp"
+    TCP="tcp"
+    TLS="tls"
 
 class AsteriskInstanceCreate(BaseModel):
     name: str
@@ -69,6 +73,7 @@ class AsteriskInstanceCreate(BaseModel):
     rtp_port_start:int
     rtp_port_end:int
     ami_port:int
+    transport_type:TransportType = TransportType.UDP
 
 
 class AsteriskInstanceResponse(BaseModel):

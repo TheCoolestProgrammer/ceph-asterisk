@@ -189,7 +189,8 @@ async def create_instance(
     os.chmod(f"{config_dir}/drivers", 0o777)
     try:
         # Create basic Asterisk config files
-        create_default_configs(config_dir, instance)
+        transport_type = instance.transport_type.value
+        create_default_configs(config_dir, instance, transport_type)
 
         # Save to database
         db_instance = AsteriskInstance(
@@ -373,7 +374,7 @@ def delete_instance(instance_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Error during deletion: {str(e)}")
 
 
-def create_default_configs(config_dir: str, instance: AsteriskInstanceCreate):
+def create_default_configs(config_dir: str, instance: AsteriskInstanceCreate, transport_type:str):
     """Создание конфигурационных файлов с правильными правами"""
 
     # Создаем директорию если не существует
@@ -423,9 +424,9 @@ load => cdr_adaptive_odbc.so
         "pjsip.conf": f"""[global]
 endpoint_identifier_order=username,ip,anonymous
 
-[transport-udp]
+[transport-{transport_type}]
 type=transport
-protocol=udp
+protocol={transport_type}
 bind=0.0.0.0:{instance.sip_port}
 [101]
 type=endpoint
@@ -464,8 +465,7 @@ username=200
 [200-aor]
 type=aor
 max_contacts=1
-
-            """,
+        """,
         "extensions.conf": """[from-internal]
 exten => _XXX,1,NoOp(Звонок на внутренний номер ${EXTEN})
 same => n,Answer()
@@ -562,6 +562,7 @@ ps_contacts => odbc,{config.ASTERISK_ODBC_ID},ps_contacts
     """
     }
     
+
     for filename, content in configs.items():
         filepath = os.path.join(config_dir, filename)
         with open(filepath, "w", encoding="utf-8") as f:
@@ -682,6 +683,7 @@ def start_asterisk_container(instance: AsteriskInstance, db: Session):
                 "container_name": f"asterisk-{instance.name}",
                 "ports": [
                     f"{instance.sip_port}:{instance.sip_port}/udp",
+                    f"{instance.sip_port}:{instance.sip_port}/tcp",
                     f"{instance.http_port}:{instance.http_port}/tcp",
                     f"{instance.rtp_port_start}-{instance.rtp_port_end}:{instance.rtp_port_start}-{instance.rtp_port_end}/udp",
                     f'{instance.ami_port}:{instance.ami_port}',

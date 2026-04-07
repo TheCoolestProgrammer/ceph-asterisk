@@ -19,20 +19,20 @@ async def get_cdr_history(
     db: Session = Depends(get_cdr_db),
 ):
     query = db.query(CDR)
-    if data.instance_name:
-        query = query.filter(CDR.uniqueid.like(f"%{data.instance_name}%"))
+    # if data.instance_name:
+    #     query = query.filter(CDR.uniqueid.like(f"%{data.instance_name}%"))
     
-    if data.src:
-        query = query.filter(CDR.src.like(f"%{data.src}%"))
+    # if data.src:
+    #     query = query.filter(CDR.src.like(f"%{data.src}%"))
     
-    if data.dst:
-        query = query.filter(CDR.dst.like(f"%{data.dst}%"))
+    # if data.dst:
+    #     query = query.filter(CDR.dst.like(f"%{data.dst}%"))
         
-    if data.date_from:
-        query = query.filter(CDR.start >= data.date_from)
+    # if data.date_from:
+    #     query = query.filter(CDR.start >= data.date_from)
         
-    if data.date_to:
-        query = query.filter(CDR.end <= data.date_to)
+    # if data.date_to:
+    #     query = query.filter(CDR.end <= data.date_to)
 
     return query.order_by(CDR.start.desc())\
                 .limit(data.limit)\
