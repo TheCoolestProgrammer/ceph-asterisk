@@ -1,6 +1,6 @@
-from sqlalchemy import Column, String, Integer, Enum, Text, create_engine
+from sqlalchemy import Column, String, Integer, Enum, Text, create_engine, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, relationship
 from database import BaseCDR
 import enum
 
@@ -12,11 +12,20 @@ class PjsipEndpoint(BaseCDR):
     """Основные настройки логики вызовов для пользователя"""
     __tablename__ = 'ps_endpoints'
 
-    id = Column(String(40), primary_key=True)  # Имя: '101'
+    pk = Column(Integer, primary_key=True, autoincrement=True)
+    # тут стоит пояснить, что id это скорее просто имя
+    # а ключ вводится для того, чтобы удобнее детектить дубликаты номеров
+    # по двум полям: username(или id) и reg_server и не вводить составной ключ
+    id = Column(String(40))  # Имя: '101'
     transport = Column(String(40), default='transport-udp')
     #возможно будет лучше сделать их foreign key
     aors = Column(String(200))                 # Ссылка на ID в ps_aors
     auth = Column(String(40))                 # Ссылка на ID в ps_auths
+    # так как эти двое требуют строковое представление,
+    # то воодим нормальные ключи
+    aors_id = Column(Integer, ForeignKey("ps_aors.pk", ondelete='CASCADE'))
+    auths_id = Column(Integer, ForeignKey("ps_auths.pk", ondelete='CASCADE'))
+
     context = Column(String(40), default='from-internal')
     disallow = Column(String(200), default='all')
     allow = Column(String(200), default='ulaw,alaw')
@@ -26,18 +35,27 @@ class PjsipEndpoint(BaseCDR):
     force_rport = Column(Enum(Choise), default=Choise.YES)
     mwi_from_user = Column(String(40))
 
+    aors_fk = relationship("PjsipAor", back_populates="endpoints")
+    auths_fk = relationship("PjsipAuth", back_populates="endpoints")
+
 class PjsipAuth(BaseCDR):
     """Логины и пароли"""
     __tablename__ = 'ps_auths'
+
+    pk = Column(Integer, primary_key=True, autoincrement=True)
 
     id = Column(String(40), primary_key=True)  # Например: '101-auth'
     auth_type = Column(Enum('userpass', 'md5'), default='userpass')
     password = Column(String(80))
     username = Column(String(80))
 
+    endpoints = relationship("PjsipEndpoint", back_populates="auths_fk")
+
 class PjsipAor(BaseCDR):
     """Настройки регистрации (Address of Record)"""
     __tablename__ = 'ps_aors'
+
+    pk = Column(Integer, primary_key=True, autoincrement=True)
 
     id = Column(String(40), primary_key=True)  # Например: '101-aor'
     reg_server = Column(String(60), nullable=True) # container name
@@ -46,6 +64,9 @@ class PjsipAor(BaseCDR):
     minimum_expiration = Column(Integer, default=60)
     default_expiration = Column(Integer, default=3600)
     qualify_frequency = Column(Integer, default=30)
+
+    endpoints = relationship("PjsipEndpoint", back_populates="aors_fk")
+
 
 class PjsipContact(BaseCDR):
     """Сюда Asterisk записывает текущие IP адреса онлайн-устройств"""

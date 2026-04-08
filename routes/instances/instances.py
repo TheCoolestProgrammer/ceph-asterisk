@@ -12,7 +12,7 @@ from models.asterisk_instance import AsteriskInstance
 router = APIRouter(prefix="/instances")
 
 
-@router.post("{instance_id}/reload")
+@router.post("/{instance_id}/reload")
 async def reload_instance(instance_id: int, db: Session = Depends(get_db)):
     """Перезагрузка конфигурации Asterisk"""
     instance = (
