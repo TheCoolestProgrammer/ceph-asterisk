@@ -1,12 +1,13 @@
 from datetime import datetime
 import os
 import subprocess
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Path
 
 from database import get_db, get_cdr_db
 from models.asterisk_instance import AsteriskInstance
 from models.sip_user import PjsipEndpoint, PjsipAor, PjsipAuth
-from schemas.asterisk import SIPUserCreate, SIPUserResponse, SIPUserUpdate
+# from schemas.asterisk import SIPUserCreate, SIPUserResponse, SIPUserUpdate
 from sqlalchemy.orm import Session, joinedload
 from schemas.sip import SIPUserCreate,AuthSchema, AorSchema, SIPUserItem,SIPUserResponse, AuthUpdate, AorUpdate, SIPUserUpdate
 router = APIRouter(prefix="/instances/{instance_id}/users")
@@ -69,7 +70,8 @@ def create_sip_user(user_data: SIPUserCreate,
             auths_id=new_auth.pk,
             aors_id=new_aor.pk,
             context=user_data.context,
-            transport=f"transport-{user_data.transport.value}"
+            transport=f"transport-{user_data.transport.value}",
+            callerid=f"{user_data.callerid} / <{user_data.username}>"
         )
 
         cdr_db.add(new_endpoint)
@@ -99,7 +101,7 @@ async def get_sip_users(instance_id: int = Path(...),
     
     return numbers
 
-@router.get("/{endpoint_id}", response_model=SIPUserItem) #под username понимается номер аля 101
+@router.get("/{endpoint_id}", response_model=Optional[SIPUserItem]) #под username понимается номер аля 101
 async def get_sip_user(endpoint_id: str = Path(...),
                         instance_id: int = Path(...),
                         db: Session = Depends(get_db),

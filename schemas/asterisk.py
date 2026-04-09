@@ -2,6 +2,7 @@ from enum import Enum
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+from models.asterisk_instance import CallerIdModes
 
 class CDRState(str, Enum):
     ON = "yes"
@@ -74,6 +75,7 @@ class AsteriskInstanceCreate(BaseModel):
     rtp_port_end:int
     ami_port:int
     transport_type:TransportType = TransportType.UDP
+    # inbound_mode:CallerIdModes = CallerIdModes.ON
 
 
 class AsteriskInstanceResponse(BaseModel):
@@ -85,6 +87,7 @@ class AsteriskInstanceResponse(BaseModel):
     rtp_port_end:int
     ami_port:int
     status: str
+    # inbound_mode:str
 
     class Config:
         orm_mode = True
@@ -95,47 +98,47 @@ class ConfigUpdate(BaseModel):
     content: str
 
 
-class SIPUserCreate(BaseModel):
-    username: str
-    password: str
-    caller_id: str
-    account_code: str = ""
-    context: str = "internal"
-    instance_name: str
+# class SIPUserCreate(BaseModel):
+#     username: str
+#     password: str
+#     callerid: str
+#     account_code: str = ""
+#     context: str = "internal"
+#     instance_name: str
 
 
-class SIPUserUpdate(BaseModel):
-    password: Optional[str] = None
-    caller_id: Optional[str] = None
-    account_code: Optional[str] = None
-    context: Optional[str] = None
-    is_active: Optional[bool] = None
+# class SIPUserUpdate(BaseModel):
+#     password: Optional[str] = None
+#     callerid: Optional[str] = None
+#     account_code: Optional[str] = None
+#     context: Optional[str] = None
+#     is_active: Optional[bool] = None
 
 
-class SIPUserResponse(BaseModel):
-    id: int
-    username: str
-    caller_id: str
-    account_code: str
-    context: str
-    instance_name: str
-    is_active: bool
-    created_at: datetime
+# class SIPUserResponse(BaseModel):
+#     id: int
+#     username: str
+#     callerid: str
+#     account_code: str
+#     context: str
+#     instance_name: str
+#     is_active: bool
+#     created_at: datetime
 
-    class Config:
-        from_attributes = True
+#     class Config:
+#         from_attributes = True
 
 
-class CDRRecordWithUsers(BaseModel):
-    id: int
-    calldate: datetime
-    src: str
-    dst: str
-    src_user: Optional[SIPUserResponse] = None
-    dst_user: Optional[SIPUserResponse] = None
-    duration: int
-    billsec: int
-    disposition: str
-    accountcode: str
-    dcontext: str
-    instance_name: str
+# class CDRRecordWithUsers(BaseModel):
+#     id: int
+#     calldate: datetime
+#     src: str
+#     dst: str
+#     src_user: Optional[SIPUserResponse] = None
+#     dst_user: Optional[SIPUserResponse] = None
+#     duration: int
+#     billsec: int
+#     disposition: str
+#     accountcode: str
+#     dcontext: str
+#     instance_name: str

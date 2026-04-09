@@ -89,7 +89,7 @@ async def send_ami_command(command: str, instance_name:str, db: SessionLocal = D
         if manager: manager.close()
         raise HTTPException(status_code=500, detail=f"AMI Error: {str(e)}")
 
-@router.get("/get_contexts/{instance_id}")
+@router.get("/get_contexts/{instance_name}")
 async def get_contexts_route(instance_name:str, db: SessionLocal = Depends(get_db))->list[str]:
     cmd = "dialplan show"
     contexts=[]

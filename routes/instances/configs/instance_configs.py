@@ -1,12 +1,39 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Path
 from sqlalchemy.orm import Session
 
-from database import get_db
-from models.asterisk_instance import AsteriskInstance
+from database import get_db, get_cdr_db
+from models.asterisk_instance import AsteriskInstance, CallerIdModes
+from models.sip_user import PjsipEndpoint, Choise, PjsipAor
 from schemas.asterisk import ConfigUpdate
 
 router = APIRouter(prefix="/instances/{instance_id}/config")
 
+
+# @router.post("/change_inbound_status")
+# async def change_inbound_status(choise:CallerIdModes, instance_id:int=Path(...),db:Session=Depends(get_db) ,cdr_db: Session = Depends(get_cdr_db)):
+#     instance = db.get(AsteriskInstance, instance_id)
+#     if not instance:
+#         raise HTTPException(status_code=404, detail="Instance not found")
+#     instance.inbound_mode = choise
+
+#     new_value = Choise.YES if choise == CallerIdModes.ON else Choise.NO
+#     new_value_rev = Choise.NO if choise == CallerIdModes.ON else Choise.YES
+
+#     subquery = cdr_db.query(PjsipEndpoint.id).join(PjsipEndpoint.aors_fk).filter(
+#         PjsipAor.reg_server == instance.name
+#     ).subquery()
+
+#     cdr_db.query(PjsipEndpoint).filter(PjsipEndpoint.id.in_(subquery)).update(
+#     {
+#         PjsipEndpoint.trust_id_inbound: new_value,
+#         PjsipEndpoint.trust_id_outbound: new_value_rev
+#     },
+#     synchronize_session=False
+# )
+    # db.query(PjsipEndpoint).filter(PjsipEndpoint.aors_fk.res_server==instance.name).update({PjsipEndpoint.trust_id_inbound: new_value})
+    # db.query(PjsipEndpoint).update({PjsipEndpoint.trust_id_outbound: new_value_rev})
+    # db.commit()
+    # cdr_db.commit()
 
 @router.put("")
 async def update_config(

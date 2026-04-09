@@ -1,6 +1,13 @@
-from sqlalchemy import Column, Integer, String, Text
-from database import Base
 
+
+from sqlalchemy import Column, Integer, String, Text,Enum, Date
+from database import Base
+import datetime
+import enum
+
+class CallerIdModes(enum.Enum):
+    ON="on"
+    OFF='off'
 
 # Database Models
 class AsteriskInstance(Base):
@@ -15,4 +22,5 @@ class AsteriskInstance(Base):
     ami_port = Column(Integer, unique=True, default=5038)
     config_path = Column(Text)
     status = Column(String(20), default="stopped")
-    # create_date = Column()
+    create_date = Column(Date,default=datetime.datetime.today)
+    # inbound_mode = Column(Enum(CallerIdModes), default=CallerIdModes.ON)
