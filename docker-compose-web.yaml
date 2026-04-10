@@ -19,8 +19,8 @@ services:
       - PYTHONUNBUFFERED=1
       - PYTHONDONTWRITEBYTECODE=1
       - UV_PROJECT_ENVIRONMENT=/app/.venv  # Указываем где виртуальное окружение
-      - HTTP_PROXY=http://host.docker.internal:12345
-      - HTTPS_PROXY=http://host.docker.internal:12345
+      # - HTTP_PROXY=http://host.docker.internal:12345
+      # - HTTPS_PROXY=http://host.docker.internal:12345
     extra_hosts:
       # Это заставит Docker понять, куда ведет хост-имя
       - "host.docker.internal:host-gateway"

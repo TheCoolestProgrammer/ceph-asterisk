@@ -17,6 +17,9 @@ class AsteriskInstanceUpdate(BaseModel):
     sip_port: Optional[int] = None
     http_port: Optional[int] = None
     status: Optional[str] = None
+    rtp_port_start: Optional[int]=None
+    rtp_port_end: Optional[int]=None
+    ami_port:Optional[int]=None
 
 class CDRGet(BaseModel):
     instance_name: Optional[str] = (None,)

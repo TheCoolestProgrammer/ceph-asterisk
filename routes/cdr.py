@@ -8,41 +8,53 @@ from database import get_db, get_cdr_db
 from schemas.asterisk import ActiveCall, CDRGet, CDRRecord
 from sqlalchemy.orm import Session
 from models.cdr import CDR
-from schemas.cdr import CDRRecord, CDRInputData
+from schemas.cdr import CDRRecords, CDRInputData
 
 router = APIRouter(prefix="/cdr")
 
-
-@router.get("/",
-            #  response_model=list[CDRRecord]
-                )
+@router.get("/"
+            ,response_model=CDRRecords
+            )
 async def get_cdr_history(
-    data:CDRInputData = Depends(),
+    data: CDRInputData = Depends(),
     db: Session = Depends(get_cdr_db),
 ):
     query = db.query(CDR)
+    
+    # 1. Применяем фильтры
     if data.instance_name:
         query = query.filter(CDR.uniqueid.like(f"%{data.instance_name}%"))
-    
     if data.src:
         query = query.filter(CDR.src.like(f"%{data.src}%"))
-    
     if data.dst:
         query = query.filter(CDR.dst.like(f"%{data.dst}%"))
-        
     if data.date_from:
         query = query.filter(CDR.start >= data.date_from)
-        
     if data.date_to:
         query = query.filter(CDR.end <= data.date_to)
+    if data.disposition:
+        query = query.filter(CDR.disposition == data.disposition)
 
+    # 2. Считаем общее количество подходящих записей
+    total_count = query.count()
+
+    # 3. Получаем данные для текущей страницы
     res = query.order_by(CDR.start.desc())\
                 .limit(data.limit)\
                 .offset(data.offset)\
                 .all()
+
     for i in res:
         i.instance_name = i.uniqueid.split('-')[0]
-    return res
+
+    # 4. Возвращаем объект с метаданными
+    return {
+        "total": total_count,
+        "items": res,
+        "limit": data.limit,
+        "offset": data.offset
+    }
+
 
 
 def row_to_dict(row):

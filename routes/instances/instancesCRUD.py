@@ -24,6 +24,7 @@ from panoramisk import Manager, Message
 
 router = APIRouter(prefix="/instances")
 
+
 async def unload_module(modlue: str, instance_name:str, db: SessionLocal = Depends(get_db)):
     # stmt = select(AsteriskInstance).where(AsteriskInstance.name==instance_name)
     # result = session.execute(stmt)
@@ -268,28 +269,32 @@ async def update_instance(
             raise HTTPException(status_code=400, detail="Instance name already exists")
 
     # Проверяем уникальность портов, если они меняются
-    if instance_update.sip_port and instance_update.sip_port != instance.sip_port:
-        existing_sip_port = (
-            db.query(AsteriskInstance)
-            .filter(AsteriskInstance.sip_port == instance_update.sip_port)
-            .first()
-        )
-        if existing_sip_port:
-            raise HTTPException(status_code=400, detail="SIP port already in use")
+    
+    #TODO: заменить на нормальную проверку по всему пространству сервера
 
-    if instance_update.http_port and instance_update.http_port != instance.http_port:
-        existing_http_port = (
-            db.query(AsteriskInstance)
-            .filter(AsteriskInstance.http_port == instance_update.http_port)
-            .first()
-        )
-        if existing_http_port:
-            raise HTTPException(status_code=400, detail="HTTP port already in use")
+    # if instance_update.sip_port and instance_update.sip_port != instance.sip_port:
+    #     existing_sip_port = (
+    #         db.query(AsteriskInstance)
+    #         .filter(AsteriskInstance.sip_port == instance_update.sip_port)
+    #         .first()
+    #     )
+    #     if existing_sip_port:
+    #         raise HTTPException(status_code=400, detail="SIP port already in use")
+
+    # if instance_update.http_port and instance_update.http_port != instance.http_port:
+    #     existing_http_port = (
+    #         db.query(AsteriskInstance)
+    #         .filter(AsteriskInstance.http_port == instance_update.http_port)
+    #         .first()
+    #     )
+    #     if existing_http_port:
+    #         raise HTTPException(status_code=400, detail="HTTP port already in use")
 
     # Обновляем поля
     update_data = instance_update.dict(exclude_unset=True)
     for field, value in update_data.items():
         setattr(instance, field, value)
+
 
     db.commit()
     db.refresh(instance)
@@ -470,6 +475,7 @@ max_contacts=1
         "extensions.conf": """[from-internal]
 exten => _XXX,1,NoOp(Звонок на внутренний номер ${EXTEN})
 same => n,Answer()
+same => n,Playback(hello-morgen.wav)
 same => n, Echo()
 same => n,Hangup()
 
@@ -691,7 +697,7 @@ def start_asterisk_container(instance: AsteriskInstance, db: Session):
                 ],
                 "volumes": [
                     f"{config.PROJECT_PATH}/{config.CONFIG_FOLDER}/{instance.name}:/etc/asterisk:rw",
-                    f"{config.PROJECT_PATH}/{config.CONFIG_FOLDER}/{instance.name}/sounds:/var/lib/asterisk/sounds/en:ro",
+                    f"{config.PROJECT_PATH}/{config.CONFIG_FOLDER}/sounds:/var/lib/asterisk/sounds/en:ro",
                     f"{config.PROJECT_PATH}/{config.CONFIG_FOLDER}/{instance.name}/drivers/odbc.ini:/etc/odbc.ini",
                     f"{config.PROJECT_PATH}/{config.CONFIG_FOLDER}/{instance.name}/drivers/odbcinst.ini:/etc/odbcinst.ini"
                 

@@ -2,6 +2,7 @@ from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 from typing import Optional
 
+
 class CDRRecord(BaseModel):
 
     dst: str
@@ -26,6 +27,13 @@ class CDRRecord(BaseModel):
     
     model_config = ConfigDict(from_attributes=True)
 
+class CDRRecords(BaseModel):
+    total: int
+    items: list[CDRRecord]
+    limit: int
+    offset: int
+    
+
 class CDRInputData(BaseModel):
     instance_name: Optional[str] = None
     src: Optional[str] = None
@@ -34,3 +42,4 @@ class CDRInputData(BaseModel):
     date_to: Optional[str] = None
     limit: int = 100
     offset: int = 0
+    disposition: Optional[str]=None

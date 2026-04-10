@@ -5,7 +5,7 @@ from database import Base, engine, BaseCDR, engine_cdr
 from routes import cdr, users, auth
 from routes.instances import instances, instancesCRUD
 from routes.instances.configs import instance_configs
-
+from routes import audio_files 
 from config import config
 from ldap_auth import LDAPAuth
 
@@ -32,7 +32,7 @@ app.include_router(instancesCRUD.router)
 app.include_router(instances.router)
 app.include_router(instance_configs.router)
 app.include_router(auth.router)
-
+app.include_router(audio_files.router)
 
 @app.get("/health_check")
 def health_check():
