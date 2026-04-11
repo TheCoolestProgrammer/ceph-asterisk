@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  # 1. Поисковый движок
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - network.host=0.0.0.0
+      - http.host=0.0.0.0
+      - transport.host=127.0.0.1
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "127.0.0.1:9201:9200"
+    networks:
+      - ceph-asterisk_default
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+
+
+  # 3. Сборщик логов
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.12.0
+    container_name: filebeat
+    user: root
+    environment:
+      - PBX_NAME=test1
+    networks:
+      - ceph-asterisk_default
+    volumes:
+      - ./filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - ./asterisk_configs/test1/asterisk_logs:/var/log/asterisk:ro # Filebeat читает ту же папку
+    depends_on:
+      - elasticsearch
+
+volumes:
+  es_data:
+    name: ceph-asterisk_es_data
+    
+
+networks:
+  ceph-asterisk_default:
+    external: true
+    driver: bridge

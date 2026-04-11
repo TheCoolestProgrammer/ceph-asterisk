@@ -1,0 +1,18 @@
+filebeat.inputs:
+- type: log
+  enabled: true
+  paths:
+    - /var/log/asterisk/messages* # Добавили звездочку на случай ротации логов
+  fields:
+    pbx_id: ${PBX_NAME}
+  fields_under_root: true          # Теперь это внутри блока инпута
+
+output.elasticsearch:
+  hosts: ["elasticsearch:9200"]
+  # pipeline: "asterisk-parser"
+  index: "raw-asterisk-logs"
+
+setup.ilm.enabled: false
+setup.data_stream.enabled: false
+setup.template.name: "asterisk"
+setup.template.pattern: "asterisk-*"

@@ -1,0 +1,339 @@
+{
+  "took" : 5,
+  "timed_out" : false,
+  "_shards" : {
+    "total" : 1,
+    "successful" : 1,
+    "skipped" : 0,
+    "failed" : 0
+  },
+  "hits" : {
+    "total" : {
+      "value" : 32,
+      "relation" : "eq"
+    },
+    "max_score" : 1.0,
+    "hits" : [
+      {
+        "_index" : "raw-asterisk-logs",
+        "_id" : "jw2IfZ0B-UxuprktJD0A",
+        "_score" : 1.0,
+        "_source" : {
+          "@timestamp" : "2026-04-11T17:12:15.323Z",
+          "agent" : {
+            "type" : "filebeat",
+            "version" : "8.12.0",
+            "ephemeral_id" : "6f402f5e-0c3a-4b84-9b17-8b10f1d80e0c",
+            "id" : "36f93dc9-9785-425b-aa62-3e2945402769",
+            "name" : "6a4631a91aba"
+          },
+          "log" : {
+            "offset" : 0,
+            "file" : {
+              "path" : "/var/log/asterisk/messages"
+            }
+          },
+          "message" : "[2026-04-11 12:55:41] Asterisk 22.7.0 built by root @ buildkitsandbox on a x86_64 running Linux on 2026-01-21 08:06:11 UTC",
+          "input" : {
+            "type" : "log"
+          },
+          "pbx_id" : "test1",
+          "ecs" : {
+            "version" : "8.0.0"
+          },
+          "host" : {
+            "name" : "6a4631a91aba"
+          }
+        }
+      },
+      {
+        "_index" : "raw-asterisk-logs",
+        "_id" : "kA2IfZ0B-UxuprktJD0D",
+        "_score" : 1.0,
+        "_source" : {
+          "@timestamp" : "2026-04-11T17:12:15.323Z",
+          "log" : {
+            "offset" : 123,
+            "file" : {
+              "path" : "/var/log/asterisk/messages"
+            }
+          },
+          "message" : "[2026-04-11 13:33:53] WARNING[3513] res_pjsip_registrar.c: AOR '' not found for endpoint '110' (192.168.0.104:5060)",
+          "input" : {
+            "type" : "log"
+          },
+          "pbx_id" : "test1",
+          "ecs" : {
+            "version" : "8.0.0"
+          },
+          "host" : {
+            "name" : "6a4631a91aba"
+          },
+          "agent" : {
+            "version" : "8.12.0",
+            "ephemeral_id" : "6f402f5e-0c3a-4b84-9b17-8b10f1d80e0c",
+            "id" : "36f93dc9-9785-425b-aa62-3e2945402769",
+            "name" : "6a4631a91aba",
+            "type" : "filebeat"
+          }
+        }
+      },
+      {
+        "_index" : "raw-asterisk-logs",
+        "_id" : "kQ2IfZ0B-UxuprktJD0D",
+        "_score" : 1.0,
+        "_source" : {
+          "@timestamp" : "2026-04-11T17:12:15.323Z",
+          "ecs" : {
+            "version" : "8.0.0"
+          },
+          "host" : {
+            "name" : "6a4631a91aba"
+          },
+          "agent" : {
+            "ephemeral_id" : "6f402f5e-0c3a-4b84-9b17-8b10f1d80e0c",
+            "id" : "36f93dc9-9785-425b-aa62-3e2945402769",
+            "name" : "6a4631a91aba",
+            "type" : "filebeat",
+            "version" : "8.12.0"
+          },
+          "log" : {
+            "offset" : 239,
+            "file" : {
+              "path" : "/var/log/asterisk/messages"
+            }
+          },
+          "message" : "[2026-04-11 13:33:58] ERROR[3513] res_pjsip_session.c:  110: Couldn't negotiate stream 0:audio-0:audio:sendrecv (nothing)",
+          "input" : {
+            "type" : "log"
+          },
+          "pbx_id" : "test1"
+        }
+      },
+      {
+        "_index" : "raw-asterisk-logs",
+        "_id" : "kg2IfZ0B-UxuprktJD0D",
+        "_score" : 1.0,
+        "_source" : {
+          "@timestamp" : "2026-04-11T17:12:15.323Z",
+          "agent" : {
+            "ephemeral_id" : "6f402f5e-0c3a-4b84-9b17-8b10f1d80e0c",
+            "id" : "36f93dc9-9785-425b-aa62-3e2945402769",
+            "name" : "6a4631a91aba",
+            "type" : "filebeat",
+            "version" : "8.12.0"
+          },
+          "log" : {
+            "file" : {
+              "path" : "/var/log/asterisk/messages"
+            },
+            "offset" : 361
+          },
+          "message" : "[2026-04-11 13:33:59] WARNING[3518][C-00000002] file.c: File hello-morgen.wav does not exist in any format",
+          "input" : {
+            "type" : "log"
+          },
+          "pbx_id" : "test1",
+          "ecs" : {
+            "version" : "8.0.0"
+          },
+          "host" : {
+            "name" : "6a4631a91aba"
+          }
+        }
+      },
+      {
+        "_index" : "raw-asterisk-logs",
+        "_id" : "kw2IfZ0B-UxuprktJD0D",
+        "_score" : 1.0,
+        "_source" : {
+          "@timestamp" : "2026-04-11T17:12:15.323Z",
+          "message" : "[2026-04-11 13:33:59] WARNING[3518][C-00000002] file.c: Unable to open hello-morgen.wav (format (ulaw)): No such file or directory",
+          "log" : {
+            "offset" : 468,
+            "file" : {
+              "path" : "/var/log/asterisk/messages"
+            }
+          },
+          "input" : {
+            "type" : "log"
+          },
+          "pbx_id" : "test1",
+          "ecs" : {
+            "version" : "8.0.0"
+          },
+          "host" : {
+            "name" : "6a4631a91aba"
+          },
+          "agent" : {
+            "ephemeral_id" : "6f402f5e-0c3a-4b84-9b17-8b10f1d80e0c",
+            "id" : "36f93dc9-9785-425b-aa62-3e2945402769",
+            "name" : "6a4631a91aba",
+            "type" : "filebeat",
+            "version" : "8.12.0"
+          }
+        }
+      },
+      {
+        "_index" : "raw-asterisk-logs",
+        "_id" : "lA2IfZ0B-UxuprktJD0D",
+        "_score" : 1.0,
+        "_source" : {
+          "@timestamp" : "2026-04-11T17:12:15.323Z",
+          "agent" : {
+            "type" : "filebeat",
+            "version" : "8.12.0",
+            "ephemeral_id" : "6f402f5e-0c3a-4b84-9b17-8b10f1d80e0c",
+            "id" : "36f93dc9-9785-425b-aa62-3e2945402769",
+            "name" : "6a4631a91aba"
+          },
+          "message" : "[2026-04-11 13:33:59] WARNING[3518][C-00000002] app_playback.c: Playback failed on PJSIP/110-00000001 for hello-morgen.wav",
+          "log" : {
+            "file" : {
+              "path" : "/var/log/asterisk/messages"
+            },
+            "offset" : 599
+          },
+          "pbx_id" : "test1",
+          "input" : {
+            "type" : "log"
+          },
+          "ecs" : {
+            "version" : "8.0.0"
+          },
+          "host" : {
+            "name" : "6a4631a91aba"
+          }
+        }
+      },
+      {
+        "_index" : "raw-asterisk-logs",
+        "_id" : "lQ2IfZ0B-UxuprktJD0D",
+        "_score" : 1.0,
+        "_source" : {
+          "@timestamp" : "2026-04-11T17:12:15.323Z",
+          "log" : {
+            "offset" : 722,
+            "file" : {
+              "path" : "/var/log/asterisk/messages"
+            }
+          },
+          "pbx_id" : "test1",
+          "input" : {
+            "type" : "log"
+          },
+          "ecs" : {
+            "version" : "8.0.0"
+          },
+          "host" : {
+            "name" : "6a4631a91aba"
+          },
+          "agent" : {
+            "name" : "6a4631a91aba",
+            "type" : "filebeat",
+            "version" : "8.12.0",
+            "ephemeral_id" : "6f402f5e-0c3a-4b84-9b17-8b10f1d80e0c",
+            "id" : "36f93dc9-9785-425b-aa62-3e2945402769"
+          },
+          "message" : "[2026-04-11 13:34:00] ERROR[28] cdr_csv.c: Unable to open file /var/log/asterisk//cdr-csv//Master.csv : No such file or directory"
+        }
+      },
+      {
+        "_index" : "raw-asterisk-logs",
+        "_id" : "lg2IfZ0B-UxuprktJD0D",
+        "_score" : 1.0,
+        "_source" : {
+          "@timestamp" : "2026-04-11T17:12:15.323Z",
+          "ecs" : {
+            "version" : "8.0.0"
+          },
+          "host" : {
+            "name" : "6a4631a91aba"
+          },
+          "log" : {
+            "offset" : 852,
+            "file" : {
+              "path" : "/var/log/asterisk/messages"
+            }
+          },
+          "message" : "[2026-04-11 13:34:00] WARNING[28] cdr_csv.c: Unable to write CSV record to master '/var/log/asterisk//cdr-csv//Master.csv' : No such file or directory",
+          "input" : {
+            "type" : "log"
+          },
+          "pbx_id" : "test1",
+          "agent" : {
+            "ephemeral_id" : "6f402f5e-0c3a-4b84-9b17-8b10f1d80e0c",
+            "id" : "36f93dc9-9785-425b-aa62-3e2945402769",
+            "name" : "6a4631a91aba",
+            "type" : "filebeat",
+            "version" : "8.12.0"
+          }
+        }
+      },
+      {
+        "_index" : "raw-asterisk-logs",
+        "_id" : "lw2IfZ0B-UxuprktJD0D",
+        "_score" : 1.0,
+        "_source" : {
+          "@timestamp" : "2026-04-11T17:12:15.323Z",
+          "log" : {
+            "offset" : 1003,
+            "file" : {
+              "path" : "/var/log/asterisk/messages"
+            }
+          },
+          "message" : "[2026-04-11 13:53:48] ERROR[4910] res_pjsip_session.c:  110: Couldn't negotiate stream 0:audio-0:audio:sendrecv (nothing)",
+          "pbx_id" : "test1",
+          "input" : {
+            "type" : "log"
+          },
+          "ecs" : {
+            "version" : "8.0.0"
+          },
+          "host" : {
+            "name" : "6a4631a91aba"
+          },
+          "agent" : {
+            "ephemeral_id" : "6f402f5e-0c3a-4b84-9b17-8b10f1d80e0c",
+            "id" : "36f93dc9-9785-425b-aa62-3e2945402769",
+            "name" : "6a4631a91aba",
+            "type" : "filebeat",
+            "version" : "8.12.0"
+          }
+        }
+      },
+      {
+        "_index" : "raw-asterisk-logs",
+        "_id" : "mA2IfZ0B-UxuprktJD0D",
+        "_score" : 1.0,
+        "_source" : {
+          "@timestamp" : "2026-04-11T17:12:15.323Z",
+          "input" : {
+            "type" : "log"
+          },
+          "pbx_id" : "test1",
+          "ecs" : {
+            "version" : "8.0.0"
+          },
+          "host" : {
+            "name" : "6a4631a91aba"
+          },
+          "agent" : {
+            "ephemeral_id" : "6f402f5e-0c3a-4b84-9b17-8b10f1d80e0c",
+            "id" : "36f93dc9-9785-425b-aa62-3e2945402769",
+            "name" : "6a4631a91aba",
+            "type" : "filebeat",
+            "version" : "8.12.0"
+          },
+          "message" : "[2026-04-11 13:53:49] WARNING[4915][C-00000003] file.c: File hello-morgen.wav does not exist in any format",
+          "log" : {
+            "offset" : 1125,
+            "file" : {
+              "path" : "/var/log/asterisk/messages"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

@@ -5,12 +5,15 @@ from database import Base, engine, BaseCDR, engine_cdr
 from routes import cdr, users, auth
 from routes.instances import instances, instancesCRUD
 from routes.instances.configs import instance_configs
+from routes import logs
 from routes import audio_files 
 from config import config
 from ldap_auth import LDAPAuth
+from elastic import setup_elastic_pipeline
 
 Base.metadata.create_all(bind=engine)
 BaseCDR.metadata.create_all(bind=engine_cdr)
+# setup_elastic_pipeline()
 app = FastAPI(title="Asterisk Manager")
 
 app.add_middleware(
@@ -33,6 +36,7 @@ app.include_router(instances.router)
 app.include_router(instance_configs.router)
 app.include_router(auth.router)
 app.include_router(audio_files.router)
+app.include_router(logs.router)
 
 @app.get("/health_check")
 def health_check():

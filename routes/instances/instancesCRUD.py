@@ -186,8 +186,13 @@ async def create_instance(
 
     os.makedirs(config_dir, exist_ok=True)
     os.chmod(config_dir, 0o777)
+    
     os.makedirs(f"{config_dir}/drivers", exist_ok=True)
     os.chmod(f"{config_dir}/drivers", 0o777)
+    
+    os.makedirs(f"{config_dir}/asterisk_logs")
+    os.chmod(f"{config_dir}/asterisk_logs", 0o777)
+    
     try:
         # Create basic Asterisk config files
         transport_type = instance.transport_type.value
@@ -699,7 +704,8 @@ def start_asterisk_container(instance: AsteriskInstance, db: Session):
                     f"{config.PROJECT_PATH}/{config.CONFIG_FOLDER}/{instance.name}:/etc/asterisk:rw",
                     f"{config.PROJECT_PATH}/{config.CONFIG_FOLDER}/sounds:/var/lib/asterisk/sounds/en:ro",
                     f"{config.PROJECT_PATH}/{config.CONFIG_FOLDER}/{instance.name}/drivers/odbc.ini:/etc/odbc.ini",
-                    f"{config.PROJECT_PATH}/{config.CONFIG_FOLDER}/{instance.name}/drivers/odbcinst.ini:/etc/odbcinst.ini"
+                    f"{config.PROJECT_PATH}/{config.CONFIG_FOLDER}/{instance.name}/drivers/odbcinst.ini:/etc/odbcinst.ini",
+                    f"{config.PROJECT_PATH}/{config.CONFIG_FOLDER}/{instance.name}/asterisk_logs:/var/log/asterisk"
                 
                 ],
                 "networks": ["ceph-asterisk_default"],
