@@ -9,6 +9,7 @@ class AudioFormat(enum.Enum):
     GSM = "gsm"
     ALAW = "alaw"
     ULAW = "ulaw"
+    MP3 = "mp3"
 
 class AudioFile(Base):
     __tablename__ = "audio_files"

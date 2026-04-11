@@ -2,6 +2,7 @@ import os
 import shutil
 
 from fastapi import APIRouter, UploadFile, Depends, HTTPException, File, Path
+from fastapi.responses import FileResponse
 from config import config
 from loguru import logger
 from database import SessionLocal, get_db
@@ -84,7 +85,7 @@ async def upload_audio(file: UploadFile = File(...), db: Session = Depends(get_d
         duration = frames / float(rate)
     
     af = AudioFile(
-        name = f"{name_without_ext}.wav",
+        name = f"{name_without_ext}",
         format= "wav",
         size_kb= os.path.getsize(output_path) / 1024,
         duration_sec=duration
@@ -99,11 +100,37 @@ async def get_audio(db: Session = Depends(get_db)):
     audio = db.query(AudioFile).all()
     return audio
 
+
+@router.get("/get_file/{id}")
+async def get_audio_file(id: int, db: Session = Depends(get_db)):
+    # 1. Ищем запись в базе
+    sounds_dir = f"/app/{config.CONFIG_FOLDER}/sounds"
+
+    audio = db.query(AudioFile).filter(AudioFile.id == id).first()
+    
+    if not audio:
+        raise HTTPException(status_code=404, detail="Файл не найден в базе данных")
+
+    # 2. Формируем путь к файлу (например, name + format)
+    file_path = os.path.join(sounds_dir, f"{audio.name}.{audio.format}")
+
+    # 3. Проверяем, существует ли физический файл
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Файл не найден на сервере")
+
+    # 4. Возвращаем файл. 
+    # media_type поможет браузеру понять, что это аудио
+    return FileResponse(
+        path=file_path, 
+        media_type=f"audio/{audio.format}",
+        filename=f"{audio.name}.{audio.format}"
+    )
+
 @router.delete("/delete_file/{file_id}")
 async def delete_audio(file_id:int=Path(...), db: Session = Depends(get_db)):
     audio = db.query(AudioFile).filter(AudioFile.id==file_id).first()
     
-    sound_dir = f"/app/{config.CONFIG_FOLDER}/sounds/{audio.name}"
+    sound_dir = f"/app/{config.CONFIG_FOLDER}/sounds/{audio.name}.{audio.format}"
 
     os.remove(sound_dir)
     

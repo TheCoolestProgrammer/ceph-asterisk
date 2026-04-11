@@ -24,6 +24,7 @@ class CDRRecord(BaseModel):
     amaflags: int
     accountcode: Optional[int]=None
     uniqueid: str #name-id
+    instance_name:str
     
     model_config = ConfigDict(from_attributes=True)
 
