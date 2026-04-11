@@ -588,9 +588,34 @@ ps_contacts => odbc,{config.ASTERISK_ODBC_ID},ps_contacts
         #     # Если нет прав на смену владельца, используем sudo
         #     subprocess.run(['sudo', 'chown', f'{0}:{0}', filepath])
     # os.chmod(config_dir, 0o777)
-
     print(f"Конфиги созданы в {config_dir}")
+    compose_path = f"/app/{config.COMPOSE_FOLDER}"
 
+    filebeat_config = {
+        "filebeat.inputs": [
+            {
+                "type": "log",
+                "enabled": True,
+                "paths": ["/var/log/asterisk/messages*"],
+                "fields": {
+                    "pbx_id": "${PBX_NAME}"
+                },
+                "fields_under_root": True
+            }
+        ],
+        "output.elasticsearch": {
+            "hosts": ["elasticsearch:9200"],
+            # "pipeline": "asterisk-parser", # закомментированные строки в словарь обычно не включают
+            "index": "raw-asterisk-logs"
+        },
+        "setup.ilm.enabled": False,
+        "setup.data_stream.enabled": False,
+        "setup.template.name": "asterisk",
+        "setup.template.pattern": "asterisk-*"
+    }
+    filename = f"filebeat-{instance.name}.yml"
+    with open(f"{compose_path}/{filename}", "w") as f:
+        yaml.dump(filebeat_config, f)
 
 def start_asterisk_container_by_library(instance: AsteriskInstance, db: Session):
     
@@ -710,6 +735,20 @@ def start_asterisk_container(instance: AsteriskInstance, db: Session):
                 ],
                 "networks": ["ceph-asterisk_default"],
                 "privileged": True,
+            },
+            f"filebeat":{
+                "image":"docker.elastic.co/beats/filebeat:8.12.0",
+                "container_name": f"filebeat-{instance.name}",
+                "user":"root",
+                "environment":{
+                    "PBX_NAME":f"{instance.name}"
+                },
+                "networks":["ceph-asterisk_default"],
+                "volumes":[
+                    f"/{config.PROJECT_PATH}/{config.COMPOSE_FOLDER}/filebeat-{instance.name}.yml:/usr/share/filebeat/filebeat.yml:ro",
+                    f"{config.PROJECT_PATH}/{config.CONFIG_FOLDER}/{instance.name}/asterisk_logs:/var/log/asterisk:ro"
+                ],
+                "depends_on":[f"{instance.name}"]
             }
         },
         "networks": {
