@@ -603,9 +603,26 @@ ps_contacts => odbc,{config.ASTERISK_ODBC_ID},ps_contacts
                 "fields_under_root": True
             }
         ],
+        "processors": [
+            {
+                "dissect": {
+                    "tokenizer": "[%{timestamp}] %{level}[%{pid}] %{file}: %{message}",
+                    "field": "message",
+                    "target_prefix": "asterisk",
+                    "ignore_failure": True
+                }
+            },
+            {
+                "timestamp": {
+                    "field": "asterisk.timestamp",
+                    "layouts": [
+                        "2006-01-02 15:04:05"
+                    ]
+                }
+            }
+        ],
         "output.elasticsearch": {
             "hosts": ["elasticsearch:9200"],
-            # "pipeline": "asterisk-parser", # закомментированные строки в словарь обычно не включают
             "index": "raw-asterisk-logs"
         },
         "setup.ilm.enabled": False,

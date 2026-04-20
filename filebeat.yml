@@ -6,6 +6,21 @@ filebeat.inputs:
   fields:
     pbx_id: ${PBX_NAME}
   fields_under_root: true          # Теперь это внутри блока инпута
+  processors:
+  - dissect:
+      tokenizer: "[%{timestamp}] %{level}[%{pid}] %{file}: %{message}"
+      field: "message"
+      target_prefix: "asterisk"
+      ignore_failure: true
+  - replace:
+      fields:
+      - field: "message"
+        pattern: '^\[.*?\] '
+        replacement: ""
+  - timestamp:
+      field: "asterisk.timestamp"
+      layouts:
+        - "2006-01-02 15:04:05"
 
 output.elasticsearch:
   hosts: ["elasticsearch:9200"]

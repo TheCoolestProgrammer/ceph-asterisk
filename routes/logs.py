@@ -1,70 +1,62 @@
-from datetime import datetime
+from typing import Optional
 
 from fastapi import APIRouter
-import re
 from schemas.logs import LogsModel
+from elasticsearch import NotFoundError
+from elasticsearch import AsyncElasticsearch
 
 router = APIRouter(prefix="/logs")
 
-from elasticsearch import AsyncElasticsearch
-
-# from elastic import es
 # Подключаемся к Elastic (внутри Docker используй имя сервиса)
 es = AsyncElasticsearch("http://elasticsearch:9200")
 
-def parse_asterisk_log(raw_message: str):
-    # Регулярное выражение для формата:
-    # [2026-04-11 17:15:00] VERBOSE[888] chan_sip.c: Текст сообщения
-    pattern = r"\[(?P<timestamp>.*?)\] (?P<level>\w+)\[(?P<pid>\d+)\] (?P<source>.*?): (?P<msg>.*)"
-    
-    match = re.match(pattern, raw_message)
-    
-    if match:
-        data = match.groupdict()
-        # Можно сразу превратить строку с датой в объект datetime для сортировки
-        try:
-            data['timestamp'] = datetime.strptime(data['timestamp'], '%Y-%m-%d %H:%M:%S')
-        except ValueError:
-            pass # Если формат даты вдруг другой, оставляем строкой
-            
-        return data
-    
-    # Если строка не подошла под формат (например, системное сообщение), 
-    # возвращаем её как есть в поле msg
-    return {
-        "timestamp": None,
-        "level": "UNKNOWN",
-        "pid": None,
-        "source": "system",
-        "msg": raw_message
-    }
-
-@router.get("/",response_model=LogsModel)
-async def get_logs( page: int=0, limit: int = 5):
+@router.get("/", response_model=LogsModel)
+async def get_logs(page: int = 0, limit: int = 5, level: Optional[str] = None, pbx_id: Optional[str] = None, text: Optional[str] = None):
     offset = page * limit
 
-    response = await es.search(
-        index="*asterisk*", 
-        body={
-            "from": offset,
-            "size": limit,    
-            "query": {"match_all": {}},
-            "sort": [{"@timestamp": {"order": "desc"}}]
-        }
-    )
-    # return response
+    query = {"bool": {"must": [], "filter": []}}
+
+    if text:
+        query["bool"]["must"].append({"match_phrase": {"asterisk.message": text}})
+
+    if level:
+        query["bool"]["filter"].append({"term": {"asterisk.level.keyword": level}})
+
+    if pbx_id:
+        query["bool"]["filter"].append({"term": {"pbx_id.keyword": pbx_id}})
+
+    if not query["bool"]["must"] and not query["bool"]["filter"]:
+        query = {"match_all": {}}
+
+    try:
+        response = await es.search(
+            index="raw-asterisk-logs",
+            body={
+                "from": offset,
+                "size": limit,
+                "query": query,
+                "sort": [{"@timestamp": {"order": "desc"}}]
+            }
+        )
+    except NotFoundError:
+        # Индекс ещё не создан, Filebeat не отправил логи
+        return {"status": "success", "data": [], "total": 0}
+
     logs = []
-    for hit in response['hits']['hits']:
-        source = hit['_source']
-        message = source.get("message")
-        
+    for hit in response["hits"]["hits"]:
+        source = hit["_source"]
+
         logs.append({
-            # "timestamp": source.get("@timestamp"),
-            "message":parse_asterisk_log(message), 
+            "message": {
+                "timestamp": source.get("asterisk", {}).get("timestamp") or source.get("@timestamp"),
+                "level": source.get("asterisk", {}).get("level", "UNKNOWN"),
+                "pid": source.get("asterisk", {}).get("pid"),
+                "file": source.get("asterisk", {}).get("file"),
+                "message": source.get("asterisk", {}).get("message", source.get("message", ""))
+            },
             "pbx_id": source.get("pbx_id")
         })
-    
-        
-    return {"status": "success", "data": logs, "total":response["hits"]["total"]["value"]}
+
+    return {"status": "success", "data": logs, "total": response["hits"]["total"]["value"]}
 
 

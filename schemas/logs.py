@@ -1,14 +1,14 @@
 from datetime import datetime
-from typing import List, Optional, Union, Any
+from typing import List, Optional, Union
 from pydantic import BaseModel, Field
 
 class ParsedMessageModel(BaseModel):
-    """Модель данных, полученных из parse_asterisk_log"""
+    """Модель данных, собранных Filebeat из лога Asterisk"""
     timestamp: Optional[datetime] = None
     level: str
-    pid: Optional[str] = None # str, так как в регулярке \d+, но для безопасности данных лучше str или Optional[int]
-    source: str
-    msg: str
+    pid: Optional[str] = None
+    file: Optional[str] = None
+    message: str
 
 class LogEntry(BaseModel):
     """Модель отдельной записи лога"""
