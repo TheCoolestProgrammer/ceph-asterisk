@@ -1,6 +1,5 @@
 from datetime import datetime
 import random
-import subprocess
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -8,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models.asterisk_instance import AsteriskInstance
+from services.asterisk_reload import AsteriskReloadError, reload_asterisk_config
 
 router = APIRouter(prefix="/instances")
 
@@ -22,31 +22,13 @@ async def reload_instance(instance_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Instance not found")
 
     try:
-        # Execute reload command in container
-        result = subprocess.run(
-            [
-                "docker",
-                "exec",
-                f"asterisk-{instance.name}",
-                "asterisk",
-                "-rx",
-                "reload",
-            ],
-            capture_output=True,
-            text=True,
-        )
-
-        if result.returncode == 0:
-            return {"message": "Configuration reloaded successfully"}
-        else:
-            raise HTTPException(
-                status_code=500, detail=f"Failed to reload: {result.stderr}"
-            )
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Error reloading configuration: {str(e)}"
-        )
+        reload_asterisk_config(instance.name)
+        return {"message": "Configuration reloaded successfully (core + manager)"}
+    except AsteriskReloadError as e:
+        detail = e.message
+        if e.stderr:
+            detail = f"{detail}: {e.stderr}"
+        raise HTTPException(status_code=500, detail=detail)
 
 
 @router.post("{instance_id}/simulate-call")

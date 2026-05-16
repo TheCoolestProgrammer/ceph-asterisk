@@ -1,5 +1,5 @@
 from enum import Enum
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional
 from datetime import datetime
 from models.asterisk_instance import CallerIdModes
@@ -19,7 +19,25 @@ class AsteriskInstanceUpdate(BaseModel):
     status: Optional[str] = None
     rtp_port_start: Optional[int]=None
     rtp_port_end: Optional[int]=None
-    ami_port:Optional[int]=None
+    ami_port: Optional[int] = Field(default=None, ge=1, le=65535)
+    change_author: Optional[str] = None
+
+    @field_validator("ami_port", mode="before")
+    @classmethod
+    def coerce_ami_port(cls, value: object) -> object:
+        if value is None or value == "":
+            return None
+        if isinstance(value, bool):
+            raise ValueError("ami_port must be an integer")
+        if isinstance(value, float):
+            # JS/JSON иногда присылает 5000.999999 — int() даёт 5000 вместо 5001
+            return round(value)
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return None
+            return round(float(value)) if "." in value else int(value)
+        return int(value)
 
 class CDRGet(BaseModel):
     instance_name: Optional[str] = (None,)
@@ -82,18 +100,17 @@ class AsteriskInstanceCreate(BaseModel):
 
 
 class AsteriskInstanceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     name: str
     sip_port: int
     http_port: int
-    rtp_port_start:int
-    rtp_port_end:int
-    ami_port:int
+    rtp_port_start: int
+    rtp_port_end: int
+    ami_port: int
     status: str
     # inbound_mode:str
-
-    class Config:
-        orm_mode = True
 
 
 class ConfigUpdate(BaseModel):
