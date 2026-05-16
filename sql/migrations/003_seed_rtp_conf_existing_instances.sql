@@ -1,0 +1,7 @@
+-- ast_config в БД CDR; asterisk_instances — в основной БД.
+-- Для существующих АТС проще один раз сохранить RTP через PUT /instances/{id}
+-- (apply_rtp_ports_change создаст строки в ast_config, если их нет).
+--
+-- Также вручную на каждой АТС:
+-- 1) В extconfig.conf добавить: rtp.conf => odbc,<odbc_id>,ast_config_inst_<id>
+-- 2) Удалить файл rtp.conf из каталога конфигов инстанса (если есть).

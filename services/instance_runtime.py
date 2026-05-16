@@ -8,8 +8,8 @@ from services.instance_compose import InstanceComposeError, sync_instance_compos
 logger = logging.getLogger(__name__)
 
 
-def apply_ami_port_runtime(instance_id: int) -> None:
-    """Применяет compose и reload после смены AMI-порта (фоновая задача)."""
+def apply_instance_ports_runtime(instance_id: int) -> None:
+    """Compose + reload после смены AMI или RTP (фоновая задача)."""
     db = SessionLocal()
     try:
         instance = (
@@ -18,14 +18,16 @@ def apply_ami_port_runtime(instance_id: int) -> None:
             .first()
         )
         if instance is None:
-            logger.error("apply_ami_port_runtime: instance %s not found", instance_id)
+            logger.error(
+                "apply_instance_ports_runtime: instance %s not found", instance_id
+            )
             return
 
         try:
             sync_instance_compose(instance)
         except InstanceComposeError as e:
             logger.warning(
-                "compose sync after ami_port change (instance=%s): %s %s",
+                "compose sync after port change (instance=%s): %s %s",
                 instance_id,
                 e.message,
                 e.stderr,
@@ -35,10 +37,14 @@ def apply_ami_port_runtime(instance_id: int) -> None:
             reload_asterisk_config(instance.name)
         except AsteriskReloadError as e:
             logger.warning(
-                "asterisk reload after ami_port change (instance=%s): %s %s",
+                "asterisk reload after port change (instance=%s): %s %s",
                 instance_id,
                 e.message,
                 e.stderr,
             )
     finally:
         db.close()
+
+
+# обратная совместимость
+apply_ami_port_runtime = apply_instance_ports_runtime

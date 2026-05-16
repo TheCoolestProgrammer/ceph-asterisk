@@ -17,9 +17,13 @@ from utils.ast_config_views import (
     delete_ast_config_for_instance,
     drop_ast_config_view,
 )
-from services.ast_config_history import apply_manager_ami_port_change
+from services.ast_config_history import (
+    apply_manager_ami_port_change,
+    apply_rtp_ports_change,
+    seed_rtp_config_rows,
+)
 from services.instance_compose import build_compose_config
-from services.instance_runtime import apply_ami_port_runtime
+from services.instance_runtime import apply_instance_ports_runtime
 
 # from models.sip_user import SIPUser
 from schemas.asterisk import (
@@ -312,11 +316,24 @@ async def update_instance(
     update_data = instance_update.model_dump(exclude_unset=True)
     change_author = update_data.pop("change_author", None)
     update_data.pop("ami_port", None)
-    ami_port_changed = False
+    update_data.pop("rtp_port_start", None)
+    update_data.pop("rtp_port_end", None)
+    ports_runtime_needed = False
+    author = change_author or "api"
 
     new_ami_port = (
         instance_update.ami_port
         if "ami_port" in instance_update.model_fields_set
+        else None
+    )
+    new_rtp_start = (
+        instance_update.rtp_port_start
+        if "rtp_port_start" in instance_update.model_fields_set
+        else None
+    )
+    new_rtp_end = (
+        instance_update.rtp_port_end
+        if "rtp_port_end" in instance_update.model_fields_set
         else None
     )
 
@@ -338,13 +355,73 @@ async def update_instance(
                 instance_id=instance_id,
                 old_ami_port=instance.ami_port,
                 new_ami_port=new_ami_port,
-                author=change_author or "api",
+                author=author,
             )
         except ValueError as e:
             raise HTTPException(status_code=500, detail=str(e))
 
         instance.ami_port = new_ami_port
-        ami_port_changed = True
+        ports_runtime_needed = True
+
+    effective_rtp_start = (
+        new_rtp_start if new_rtp_start is not None else instance.rtp_port_start
+    )
+    effective_rtp_end = new_rtp_end if new_rtp_end is not None else instance.rtp_port_end
+
+    if new_rtp_start is not None or new_rtp_end is not None:
+        if effective_rtp_start >= effective_rtp_end:
+            raise HTTPException(
+                status_code=400,
+                detail="rtp_port_start must be less than rtp_port_end",
+            )
+
+        if (
+            effective_rtp_start != instance.rtp_port_start
+            or effective_rtp_end != instance.rtp_port_end
+        ):
+            if new_rtp_start is not None and new_rtp_start != instance.rtp_port_start:
+                conflict = (
+                    db.query(AsteriskInstance)
+                    .filter(
+                        AsteriskInstance.rtp_port_start == new_rtp_start,
+                        AsteriskInstance.id != instance_id,
+                    )
+                    .first()
+                )
+                if conflict:
+                    raise HTTPException(
+                        status_code=400, detail="RTP start port already in use"
+                    )
+            if new_rtp_end is not None and new_rtp_end != instance.rtp_port_end:
+                conflict = (
+                    db.query(AsteriskInstance)
+                    .filter(
+                        AsteriskInstance.rtp_port_end == new_rtp_end,
+                        AsteriskInstance.id != instance_id,
+                    )
+                    .first()
+                )
+                if conflict:
+                    raise HTTPException(
+                        status_code=400, detail="RTP end port already in use"
+                    )
+
+            try:
+                apply_rtp_ports_change(
+                    db_cdr,
+                    instance_id=instance_id,
+                    old_rtp_start=instance.rtp_port_start,
+                    old_rtp_end=instance.rtp_port_end,
+                    new_rtp_start=effective_rtp_start,
+                    new_rtp_end=effective_rtp_end,
+                    author=author,
+                )
+            except ValueError as e:
+                raise HTTPException(status_code=500, detail=str(e))
+
+            instance.rtp_port_start = effective_rtp_start
+            instance.rtp_port_end = effective_rtp_end
+            ports_runtime_needed = True
 
     for field, value in update_data.items():
         setattr(instance, field, value)
@@ -352,8 +429,8 @@ async def update_instance(
     db.commit()
     db.refresh(instance)
 
-    if ami_port_changed:
-        background_tasks.add_task(apply_ami_port_runtime, instance_id)
+    if ports_runtime_needed:
+        background_tasks.add_task(apply_instance_ports_runtime, instance_id)
 
     return instance
 
@@ -554,10 +631,6 @@ enabled=yes
 bindaddr=0.0.0.0
 bindport={instance.http_port}
             """,
-        "rtp.conf": f"""[general]
-rtpstart={instance.rtp_port_start}
-rtpend={instance.rtp_port_end}
-            """,
         "stasis.conf": """[general]
 enabled=no
             """,
@@ -631,6 +704,7 @@ ps_endpoint_id_ips => odbc,{config.ASTERISK_ODBC_ID},ps_endpoint_id_ips
 ps_contacts => odbc,{config.ASTERISK_ODBC_ID},ps_contacts
 
 manager.conf => odbc,{config.ASTERISK_ODBC_ID},{ast_config_view_name(instance_id)}
+rtp.conf => odbc,{config.ASTERISK_ODBC_ID},{ast_config_view_name(instance_id)}
     """,
     }
     manager_conf = [
@@ -670,6 +744,10 @@ manager.conf => odbc,{config.ASTERISK_ODBC_ID},{ast_config_view_name(instance_id
                     var_metric=var_metric,
                 )
                 db_cdr.add(mgr_conf)
+
+    seed_rtp_config_rows(
+        db_cdr, instance_id, instance.rtp_port_start, instance.rtp_port_end
+    )
     db_cdr.commit()
     # log_conf1 = AsteriskConf(
     #     filename="logger.conf",

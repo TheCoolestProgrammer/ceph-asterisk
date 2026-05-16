@@ -8,6 +8,7 @@ from models.ast_conf import AsteriskConf
 from models.ast_conf_history import AsteriskConfigHistory
 
 MANAGER_CONF_FILENAME = "manager.conf"
+RTP_CONF_FILENAME = "rtp.conf"
 
 # Поля строки ast_config, которые попадают в снапшот (без id — при откате создаются новые).
 _SNAPSHOT_ROW_KEYS = (
@@ -141,6 +142,109 @@ def rollback_to_version(session: Session, history_id: int) -> list[AsteriskConf]
     return restored
 
 
+def seed_rtp_config_rows(
+    session: Session,
+    instance_id: int,
+    rtp_port_start: int,
+    rtp_port_end: int,
+) -> None:
+    """Начальные строки rtp.conf в ast_config при создании АТС."""
+    rows = (
+        ("rtpstart", str(int(rtp_port_start)), 1),
+        ("rtpend", str(int(rtp_port_end)), 2),
+    )
+    for var_name, var_val, var_metric in rows:
+        session.add(
+            AsteriskConf(
+                instance_id=instance_id,
+                filename=RTP_CONF_FILENAME,
+                category="general",
+                var_name=var_name,
+                var_val=var_val,
+                cat_metric=1,
+                var_metric=var_metric,
+            )
+        )
+
+
+def _update_config_var_rows(
+    session: Session,
+    instance_id: int,
+    filename: str,
+    category: str,
+    var_name: str,
+    var_val: str,
+    *,
+    cat_metric: int = 1,
+    var_metric: int = 1,
+) -> None:
+    rows = (
+        session.query(AsteriskConf)
+        .filter(
+            AsteriskConf.instance_id == instance_id,
+            AsteriskConf.filename == filename,
+            AsteriskConf.category == category,
+            AsteriskConf.var_name == var_name,
+        )
+        .all()
+    )
+    if not rows:
+        session.add(
+            AsteriskConf(
+                instance_id=instance_id,
+                filename=filename,
+                category=category,
+                var_name=var_name,
+                var_val=var_val,
+                cat_metric=cat_metric,
+                var_metric=var_metric,
+            )
+        )
+        return
+    for row in rows:
+        row.var_val = var_val
+
+
+def apply_rtp_ports_change(
+    session: Session,
+    instance_id: int,
+    old_rtp_start: int,
+    old_rtp_end: int,
+    new_rtp_start: int,
+    new_rtp_end: int,
+    author: str,
+) -> None:
+    """Снапшот rtp.conf в историю и обновление rtpstart/rtpend в ast_config."""
+    save_file_version(
+        session,
+        instance_id,
+        RTP_CONF_FILENAME,
+        f"rtp: {old_rtp_start}-{old_rtp_end} -> {new_rtp_start}-{new_rtp_end}",
+        author,
+        commit=False,
+    )
+
+    _update_config_var_rows(
+        session,
+        instance_id,
+        RTP_CONF_FILENAME,
+        "general",
+        "rtpstart",
+        str(int(new_rtp_start)),
+        var_metric=1,
+    )
+    _update_config_var_rows(
+        session,
+        instance_id,
+        RTP_CONF_FILENAME,
+        "general",
+        "rtpend",
+        str(int(new_rtp_end)),
+        var_metric=2,
+    )
+    session.commit()
+
+
 def apply_manager_ami_port_change(
     session: Session,
     instance_id: int,
@@ -161,29 +265,31 @@ def apply_manager_ami_port_change(
         commit=False,
     )
 
-    port_rows = (
+    _update_config_var_rows(
+        session,
+        instance_id,
+        MANAGER_CONF_FILENAME,
+        "general",
+        "port",
+        str(int(new_ami_port)),
+        var_metric=1,
+    )
+    session.commit()
+    port_row = (
         session.query(AsteriskConf)
         .filter(
             AsteriskConf.instance_id == instance_id,
             AsteriskConf.filename == MANAGER_CONF_FILENAME,
-            AsteriskConf.category == "general",
             AsteriskConf.var_name == "port",
         )
-        .all()
+        .first()
     )
-    if not port_rows:
-        session.rollback()
+    if port_row is None:
         raise ValueError(
             f"manager.conf [general] port not found for instance_id={instance_id}"
         )
-
-    port_value = str(int(new_ami_port))
-    for port_row in port_rows:
-        port_row.var_val = port_value
-
-    session.commit()
-    session.refresh(port_rows[0])
-    return port_rows[0]
+    session.refresh(port_row)
+    return port_row
 
 
 def get_file_history(

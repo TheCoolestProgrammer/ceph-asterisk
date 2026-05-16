@@ -17,20 +17,19 @@ class AsteriskInstanceUpdate(BaseModel):
     sip_port: Optional[int] = None
     http_port: Optional[int] = None
     status: Optional[str] = None
-    rtp_port_start: Optional[int]=None
-    rtp_port_end: Optional[int]=None
+    rtp_port_start: Optional[int] = Field(default=None, ge=1, le=65535)
+    rtp_port_end: Optional[int] = Field(default=None, ge=1, le=65535)
     ami_port: Optional[int] = Field(default=None, ge=1, le=65535)
     change_author: Optional[str] = None
 
-    @field_validator("ami_port", mode="before")
+    @field_validator("ami_port", "rtp_port_start", "rtp_port_end", mode="before")
     @classmethod
-    def coerce_ami_port(cls, value: object) -> object:
+    def coerce_port_int(cls, value: object) -> object:
         if value is None or value == "":
             return None
         if isinstance(value, bool):
-            raise ValueError("ami_port must be an integer")
+            raise ValueError("port must be an integer")
         if isinstance(value, float):
-            # JS/JSON иногда присылает 5000.999999 — int() даёт 5000 вместо 5001
             return round(value)
         if isinstance(value, str):
             value = value.strip()
