@@ -9,6 +9,7 @@ from models.ast_conf_history import AsteriskConfigHistory
 
 MANAGER_CONF_FILENAME = "manager.conf"
 RTP_CONF_FILENAME = "rtp.conf"
+HTTP_CONF_FILENAME = "http.conf"
 
 # Поля строки ast_config, которые попадают в снапшот (без id — при откате создаются новые).
 _SNAPSHOT_ROW_KEYS = (
@@ -142,6 +143,31 @@ def rollback_to_version(session: Session, history_id: int) -> list[AsteriskConf]
     return restored
 
 
+def seed_http_config_rows(
+    session: Session,
+    instance_id: int,
+    http_port: int,
+) -> None:
+    """Начальные строки http.conf в ast_config при создании АТС."""
+    rows = (
+        ("enabled", "yes", 1),
+        ("bindaddr", "0.0.0.0", 2),
+        ("bindport", str(int(http_port)), 3),
+    )
+    for var_name, var_val, var_metric in rows:
+        session.add(
+            AsteriskConf(
+                instance_id=instance_id,
+                filename=HTTP_CONF_FILENAME,
+                category="general",
+                var_name=var_name,
+                var_val=var_val,
+                cat_metric=1,
+                var_metric=var_metric,
+            )
+        )
+
+
 def seed_rtp_config_rows(
     session: Session,
     instance_id: int,
@@ -243,6 +269,50 @@ def apply_rtp_ports_change(
         var_metric=2,
     )
     session.commit()
+
+
+def apply_http_port_change(
+    session: Session,
+    instance_id: int,
+    old_http_port: int,
+    new_http_port: int,
+    author: str,
+) -> AsteriskConf:
+    """Снапшот http.conf в историю и обновление bindport в ast_config."""
+    save_file_version(
+        session,
+        instance_id,
+        HTTP_CONF_FILENAME,
+        f"http_port: {old_http_port} -> {new_http_port}",
+        author,
+        commit=False,
+    )
+
+    _update_config_var_rows(
+        session,
+        instance_id,
+        HTTP_CONF_FILENAME,
+        "general",
+        "bindport",
+        str(int(new_http_port)),
+        var_metric=3,
+    )
+    session.commit()
+    port_row = (
+        session.query(AsteriskConf)
+        .filter(
+            AsteriskConf.instance_id == instance_id,
+            AsteriskConf.filename == HTTP_CONF_FILENAME,
+            AsteriskConf.var_name == "bindport",
+        )
+        .first()
+    )
+    if port_row is None:
+        raise ValueError(
+            f"http.conf [general] bindport not found for instance_id={instance_id}"
+        )
+    session.refresh(port_row)
+    return port_row
 
 
 def apply_manager_ami_port_change(

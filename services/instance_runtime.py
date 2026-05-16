@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 def apply_instance_ports_runtime(instance_id: int) -> None:
-    """Compose + reload после смены AMI или RTP (фоновая задача)."""
+    """Compose + reload после смены AMI, HTTP или RTP (фоновая задача)."""
     db = SessionLocal()
     try:
         instance = (

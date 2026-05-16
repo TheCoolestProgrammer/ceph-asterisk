@@ -22,7 +22,9 @@ class AsteriskInstanceUpdate(BaseModel):
     ami_port: Optional[int] = Field(default=None, ge=1, le=65535)
     change_author: Optional[str] = None
 
-    @field_validator("ami_port", "rtp_port_start", "rtp_port_end", mode="before")
+    @field_validator(
+        "ami_port", "http_port", "rtp_port_start", "rtp_port_end", mode="before"
+    )
     @classmethod
     def coerce_port_int(cls, value: object) -> object:
         if value is None or value == "":

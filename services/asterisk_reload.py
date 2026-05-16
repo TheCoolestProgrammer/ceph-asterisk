@@ -85,10 +85,11 @@ def reload_asterisk_config(
 ) -> list[ReloadResult]:
     """
     Перезагружает конфигурацию после изменений в ast_config.
-    manager reload — AMI/manager.conf; core reload — остальное.
+    manager reload — AMI/manager.conf; http reload — http.conf; core reload — остальное.
     """
     commands = (
         "manager reload",
+        "http reload",
         "module reload res_rtp_asterisk.so",
         "core reload",
     )

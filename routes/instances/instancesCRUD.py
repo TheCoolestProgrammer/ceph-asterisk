@@ -18,8 +18,10 @@ from utils.ast_config_views import (
     drop_ast_config_view,
 )
 from services.ast_config_history import (
+    apply_http_port_change,
     apply_manager_ami_port_change,
     apply_rtp_ports_change,
+    seed_http_config_rows,
     seed_rtp_config_rows,
 )
 from services.instance_compose import build_compose_config
@@ -316,11 +318,17 @@ async def update_instance(
     update_data = instance_update.model_dump(exclude_unset=True)
     change_author = update_data.pop("change_author", None)
     update_data.pop("ami_port", None)
+    update_data.pop("http_port", None)
     update_data.pop("rtp_port_start", None)
     update_data.pop("rtp_port_end", None)
     ports_runtime_needed = False
     author = change_author or "api"
 
+    new_http_port = (
+        instance_update.http_port
+        if "http_port" in instance_update.model_fields_set
+        else None
+    )
     new_ami_port = (
         instance_update.ami_port
         if "ami_port" in instance_update.model_fields_set
@@ -336,6 +344,32 @@ async def update_instance(
         if "rtp_port_end" in instance_update.model_fields_set
         else None
     )
+
+    if new_http_port is not None and new_http_port != instance.http_port:
+        existing_http_port = (
+            db.query(AsteriskInstance)
+            .filter(
+                AsteriskInstance.http_port == new_http_port,
+                AsteriskInstance.id != instance_id,
+            )
+            .first()
+        )
+        if existing_http_port:
+            raise HTTPException(status_code=400, detail="HTTP port already in use")
+
+        try:
+            apply_http_port_change(
+                db_cdr,
+                instance_id=instance_id,
+                old_http_port=instance.http_port,
+                new_http_port=new_http_port,
+                author=author,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+        instance.http_port = new_http_port
+        ports_runtime_needed = True
 
     if new_ami_port is not None and new_ami_port != instance.ami_port:
         existing_ami_port = (
@@ -626,11 +660,6 @@ same => n,Answer()
 same => n,Dial(PJSIP/101,20)
 same => n,Hangup()
             """,
-        "http.conf": f"""[general]
-enabled=yes
-bindaddr=0.0.0.0
-bindport={instance.http_port}
-            """,
         "stasis.conf": """[general]
 enabled=no
             """,
@@ -705,6 +734,7 @@ ps_contacts => odbc,{config.ASTERISK_ODBC_ID},ps_contacts
 
 manager.conf => odbc,{config.ASTERISK_ODBC_ID},{ast_config_view_name(instance_id)}
 rtp.conf => odbc,{config.ASTERISK_ODBC_ID},{ast_config_view_name(instance_id)}
+http.conf => odbc,{config.ASTERISK_ODBC_ID},{ast_config_view_name(instance_id)}
     """,
     }
     manager_conf = [
@@ -745,6 +775,7 @@ rtp.conf => odbc,{config.ASTERISK_ODBC_ID},{ast_config_view_name(instance_id)}
                 )
                 db_cdr.add(mgr_conf)
 
+    seed_http_config_rows(db_cdr, instance_id, instance.http_port)
     seed_rtp_config_rows(
         db_cdr, instance_id, instance.rtp_port_start, instance.rtp_port_end
     )
