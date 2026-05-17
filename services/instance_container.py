@@ -11,6 +11,7 @@ from config import config
 from models.asterisk_instance import AsteriskInstance
 from services.asterisk_reload import container_name_for_instance
 from utils.instance_paths import docker_volume_config_dir
+from utils.asterisk_image import ensure_asterisk_image
 from utils.instance_volumes import build_asterisk_container_volumes
 
 logger = logging.getLogger(__name__)
@@ -140,15 +141,15 @@ def remove_asterisk_container(instance_name: str) -> None:
         pass
 
 
-def run_asterisk_container(instance: AsteriskInstance, db) -> None:
+def run_asterisk_container(
+    instance: AsteriskInstance,
+    db,
+    *,
+    force_rebuild_image: bool = False,
+) -> None:
     """Создаёт контейнер asterisk-{name} с volume конфигов с хоста."""
     client = docker.from_env()
-    try:
-        image = client.images.get(config.ASTERISK_IMAGE_TAG)
-    except docker.errors.ImageNotFound:
-        image, _ = client.images.build(
-            path=config.ASTERISK_IMAGE_PATH, tag=config.ASTERISK_IMAGE_TAG
-        )
+    image = ensure_asterisk_image(client, force_rebuild=force_rebuild_image)
 
     base_path = docker_volume_config_dir(instance)
     port_bindings = {
@@ -173,9 +174,14 @@ def run_asterisk_container(instance: AsteriskInstance, db) -> None:
     logger.info("Container asterisk-%s started, config volume %s", instance.name, base_path)
 
 
-def recreate_asterisk_container(instance: AsteriskInstance, db) -> str:
+def recreate_asterisk_container(
+    instance: AsteriskInstance,
+    db,
+    *,
+    force_rebuild_image: bool = False,
+) -> str:
     """Останавливает и пересоздаёт контейнер с актуальным bind-mount конфигов."""
     expected = docker_volume_config_dir(instance)
     remove_asterisk_container(instance.name)
-    run_asterisk_container(instance, db)
+    run_asterisk_container(instance, db, force_rebuild_image=force_rebuild_image)
     return expected

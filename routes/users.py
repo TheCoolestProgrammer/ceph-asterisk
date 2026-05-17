@@ -8,6 +8,9 @@ from database import get_db, get_cdr_db
 from models.asterisk_instance import AsteriskInstance
 from models.sip_user import PjsipEndpoint, PjsipAor, PjsipAuth
 from services.pjsip_disk_sync import _format_callerid, write_pjsip_users_conf
+from services.voicemail_config import create_voicemail_box, mailbox_exists
+from schemas.voicemail import VoicemailCreate
+from utils.voicemail_dialplan import ensure_voicemail_dialplan
 # from schemas.asterisk import SIPUserCreate, SIPUserResponse, SIPUserUpdate
 from sqlalchemy.orm import Session, joinedload
 from schemas.sip import SIPUserCreate,AuthSchema, AorSchema, SIPUserItem,SIPUserResponse, AuthUpdate, AorUpdate, SIPUserUpdate
@@ -76,10 +79,34 @@ def create_sip_user(user_data: SIPUserCreate,
         )
 
         cdr_db.add(new_endpoint)
-        cdr_db.commit()
+        cdr_db.flush()
+
+        if not mailbox_exists(cdr_db, instance_id, user_data.username):
+            create_voicemail_box(
+                cdr_db,
+                instance_id,
+                instance.name,
+                VoicemailCreate(
+                    mailbox=user_data.username,
+                    password="4242",
+                    full_name=user_data.callerid or user_data.username,
+                    link_endpoint_mwi=True,
+                ),
+                instance=instance,
+            )
+        else:
+            new_endpoint.mailboxes = f"{user_data.username}@default"
+            ensure_voicemail_dialplan(cdr_db, instance_id)
+            cdr_db.commit()
+
         write_pjsip_users_conf(instance, cdr_db)
 
-        return {"status": "success", "username": user_data.username}
+        return {
+            "status": "success",
+            "username": user_data.username,
+            "voicemail": f"{user_data.username}@default",
+            "voicemail_pin": "4242",
+        }
     
     except Exception as e:
         db.rollback()

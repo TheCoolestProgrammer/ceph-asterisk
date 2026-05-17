@@ -58,15 +58,32 @@ def get_db_config_templates(
         # max_contacts=1
         # """,
         "extensions.conf": """[from-internal]
+exten => 777,1,NoOp(Сервис 777 от ${CALLERID(num)})
+exten => 777,n,Answer()
+exten => 777,n,Dial(PJSIP/101,30)
+exten => 777,n,GotoIf($["${DIALSTATUS}"="ANSWER"]?int777_done)
+exten => 777,n,VoiceMail(101@default)
+exten => 777,n,Hangup()
+exten => 777,n(int777_done),Hangup()
+
 exten => _XXX,1,NoOp(Звонок ${CALLERID(num)} -> ${EXTEN})
 exten => _XXX,n,Dial(PJSIP/${EXTEN},30)
 exten => _XXX,n,GotoIf($["${DIALSTATUS}"="ANSWER"]?vm_done)
-exten => _XXX,n,VoiceMail(${EXTEN}@default,u)
+exten => _XXX,n,VoiceMail(${EXTEN}@default)
+exten => _XXX,n,Hangup()
 exten => _XXX,n(vm_done),Hangup()
 
-exten => *97,1,NoOp(Доступ к голосовой почте)
+exten => *97,1,NoOp(Голосовая почта ${CALLERID(num)})
+exten => *97,n,Answer()
+exten => *97,n,Wait(1)
 exten => *97,n,VoiceMailMain(${CALLERID(num)}@default)
 exten => *97,n,Hangup()
+
+exten => 8097,1,NoOp(Голосовая почта ${CALLERID(num)})
+exten => 8097,n,Answer()
+exten => 8097,n,Wait(1)
+exten => 8097,n,VoiceMailMain(${CALLERID(num)}@default)
+exten => 8097,n,Hangup()
 
 exten => 8000,1,NoOp(Очередь test-support)
 exten => 8000,n,Answer()
@@ -74,12 +91,25 @@ exten => 8000,n,Queue(test-support,t,,,300)
 exten => 8000,n,Hangup()
 
 [from-external]
-exten => 777,1,NoOp(Входящий звонок от клиента ${CALLERID(all)})
+exten => 777,1,NoOp(Входящий на 777 от ${CALLERID(all)})
 exten => 777,n,Answer()
-exten => 777,n,Dial(PJSIP/101,20)
-exten => 777,n,GotoIf($["${DIALSTATUS}"="ANSWER"]?ext_done)
-exten => 777,n,VoiceMail(101@default,u)
-exten => 777,n(ext_done),Hangup()
+exten => 777,n,Dial(PJSIP/101,30)
+exten => 777,n,GotoIf($["${DIALSTATUS}"="ANSWER"]?ext777_done)
+exten => 777,n,VoiceMail(101@default)
+exten => 777,n,Hangup()
+exten => 777,n(ext777_done),Hangup()
+
+exten => *97,1,NoOp(Голосовая почта ${CALLERID(num)})
+exten => *97,n,Answer()
+exten => *97,n,Wait(1)
+exten => *97,n,VoiceMailMain(${CALLERID(num)}@default)
+exten => *97,n,Hangup()
+
+exten => 8097,1,NoOp(Голосовая почта ${CALLERID(num)})
+exten => 8097,n,Answer()
+exten => 8097,n,Wait(1)
+exten => 8097,n,VoiceMailMain(${CALLERID(num)}@default)
+exten => 8097,n,Hangup()
 """,
         "voicemail.conf": """[general]
 format = wav49|gsm|wav

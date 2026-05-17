@@ -32,8 +32,8 @@ def build_compose_config(instance: AsteriskInstance) -> dict:
         "services": {
             instance.name: {
                 "build": {
-                    "context": f"/app/{config.COMPOSE_FOLDER}",
-                    "dockerfile": "dockerfile",
+                    "context": f"/app/docker",
+                    "dockerfile": "asterisk.Dockerfile",
                 },
                 "container_name": f"asterisk-{instance.name}",
                 "ports": [

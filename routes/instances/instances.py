@@ -17,6 +17,11 @@ from services.asterisk_reload import (
 )
 from services.pjsip_schema import ensure_pjsip_schema
 from utils.dialplan_repair import repair_internal_dialplan, repair_queue_and_moh
+from utils.voicemail_dialplan import ensure_voicemail_dialplan
+from services.voicemail_sounds import (
+    check_voicemail_prompts,
+    warn_if_sounds_mount_overrides_defaults,
+)
 from services.instance_container import (
     recreate_asterisk_container,
     verify_instance_config_mount,
@@ -51,14 +56,23 @@ async def reload_instance(
         sync_pjsip_views_for_instance(db, db_cdr, instance)
         dialplan_fixed = repair_internal_dialplan(db_cdr, instance_id)
         media_fixed = repair_queue_and_moh(db_cdr, instance_id)
+        vm_dialplan_fixed = ensure_voicemail_dialplan(db_cdr, instance_id)
         reload_asterisk_config(instance.name)
         msg = "Configuration reloaded successfully (core + manager)"
         if dialplan_fixed:
             msg += "; internal dialplan repaired (Echo -> Dial)"
         if media_fixed:
             msg += "; queue/MOH dialplan repaired"
+        if vm_dialplan_fixed:
+            msg += "; voicemail dialplan updated (cat_metric fix, 777, 8097)"
         if schema_added:
             msg += f"; schema columns added: {', '.join(schema_added)}"
+        sounds_warn = warn_if_sounds_mount_overrides_defaults(instance)
+        if sounds_warn:
+            msg += f"; WARNING: {sounds_warn}"
+        vm_sounds_warn = check_voicemail_prompts(instance.name)
+        if vm_sounds_warn:
+            msg += f"; WARNING: {vm_sounds_warn}"
         return {"message": msg}
     except AsteriskReloadError as e:
         detail = e.message
@@ -100,13 +114,43 @@ async def seed_test_users(
         "created": created,
         "voicemail_created": vm_created,
         "message": "Перезагрузите софтфоны: 101/strongpassword, 102/testpass102. "
-        "Голосовая почта: наберите *97, PIN 4242.",
+        "Голосовая почта: *97 или 8097 (Blink), PIN 4242.",
     }
+
+
+@router.post("/{instance_id}/rebuild-asterisk-image")
+async def rebuild_asterisk_image(
+    instance_id: int,
+    db: Session = Depends(get_db),
+):
+    """Пересобирает образ my-asterisk с промптами voicemail (vm-intro ulaw)."""
+    instance = (
+        db.query(AsteriskInstance).filter(AsteriskInstance.id == instance_id).first()
+    )
+    if not instance:
+        raise HTTPException(status_code=404, detail="Instance not found")
+    try:
+        import docker
+
+        from utils.asterisk_image import ensure_asterisk_image, image_has_voicemail_sounds
+
+        ensure_asterisk_image(docker.from_env(), force_rebuild=True)
+        has_sounds = image_has_voicemail_sounds()
+        from config import config
+
+        return {
+            "message": "Asterisk image rebuilt",
+            "image_tag": config.ASTERISK_IMAGE_TAG,
+            "vm_intro_present": has_sounds,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/{instance_id}/recreate-container")
 async def recreate_container(
     instance_id: int,
+    rebuild_image: bool = False,
     db: Session = Depends(get_db),
     db_cdr: Session = Depends(get_cdr_db),
 ):
@@ -122,11 +166,16 @@ async def recreate_container(
 
     try:
         sync_pjsip_views_for_instance(db, db_cdr, instance)
-        volume_path = recreate_asterisk_container(instance, db)
+        volume_path = recreate_asterisk_container(
+            instance, db, force_rebuild_image=rebuild_image
+        )
         reload_asterisk_config(instance.name)
         mount = verify_instance_config_mount(instance)
+        msg = "Container recreated"
+        if rebuild_image:
+            msg += " (Asterisk image rebuilt with voicemail sounds)"
         return {
-            "message": "Container recreated",
+            "message": msg,
             "config_volume_host_path": volume_path,
             "mount": mount,
         }

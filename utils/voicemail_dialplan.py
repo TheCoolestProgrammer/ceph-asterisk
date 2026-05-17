@@ -1,4 +1,4 @@
-"""Диалплан для Asterisk voicemail: запись при недозвоне и *97 для софтфона."""
+"""Диалплан для Asterisk voicemail: запись при недозвоне и доступ с софтфона."""
 
 from sqlalchemy.orm import Session
 
@@ -6,21 +6,86 @@ from models.ast_conf import AsteriskConf
 
 EXTENSIONS_FILENAME = "extensions.conf"
 
+VM_CONTEXTS = ("from-internal", "from-external")
 
-def _next_metrics(
-    db_cdr: Session, instance_id: int, category: str
-) -> tuple[int, int]:
-    max_cat = (
+# ODBC realtime (res_config_odbc): при смене cat_metric внутри одного [context]
+# создаётся отдельный блок — в диалплан попадает только один из них.
+# Все exten одного контекста должны иметь один cat_metric, различаться var_metric.
+
+FULL_777_REQUIRED_FRAGMENTS = (
+    "777,n,Answer()",
+    "777,n,Dial(PJSIP/101",
+    "777,n,VoiceMail(101@default)",
+)
+
+
+def _full_777_lines(done_label: str, noop: str) -> list[str]:
+    return [
+        f"777,1,NoOp({noop})",
+        "777,n,Answer()",
+        "777,n,Dial(PJSIP/101,30)",
+        f'777,n,GotoIf($["${{DIALSTATUS}}"="ANSWER"]?{done_label})',
+        '777,n,NoOp(777 VM DIALSTATUS=${DIALSTATUS})',
+        "777,n,VoiceMail(101@default)",
+        "777,n,Hangup()",
+        f"777,n({done_label}),Hangup()",
+    ]
+
+
+INTERNAL_777_LINES = _full_777_lines(
+    "int777_done", "Сервис 777 от ${CALLERID(num)}"
+)
+EXTERNAL_777_LINES = _full_777_lines(
+    "ext777_done", "Входящий на 777 от ${CALLERID(all)}"
+)
+
+
+def _vm_access_lines(exten: str) -> list[str]:
+    return [
+        f"{exten},1,NoOp(Голосовая почта ${{CALLERID(num)}})",
+        f"{exten},n,Answer()",
+        f"{exten},n,Wait(1)",
+        f"{exten},n,VoiceMailMain(${{CALLERID(num)}}@default)",
+        f"{exten},n,Hangup()",
+    ]
+
+
+VM_ACCESS_EXTENSIONS: tuple[tuple[str, list[str]], ...] = (
+    ("*97", _vm_access_lines("*97")),
+    ("8097", _vm_access_lines("8097")),
+)
+
+
+def _context_cat_metric(db_cdr: Session, instance_id: int, category: str) -> int:
+    """Единый cat_metric для всех exten в [context]."""
+    existing = (
         db_cdr.query(AsteriskConf.cat_metric)
         .filter(
             AsteriskConf.instance_id == instance_id,
             AsteriskConf.filename == EXTENSIONS_FILENAME,
             AsteriskConf.category == category,
         )
+        .order_by(AsteriskConf.cat_metric.asc())
+        .limit(1)
+        .scalar()
+    )
+    if existing is not None:
+        return existing
+
+    max_cat = (
+        db_cdr.query(AsteriskConf.cat_metric)
+        .filter(
+            AsteriskConf.instance_id == instance_id,
+            AsteriskConf.filename == EXTENSIONS_FILENAME,
+        )
         .order_by(AsteriskConf.cat_metric.desc())
         .limit(1)
         .scalar()
     )
+    return (max_cat or 0) + 1
+
+
+def _next_var_metric(db_cdr: Session, instance_id: int, category: str) -> int:
     max_var = (
         db_cdr.query(AsteriskConf.var_metric)
         .filter(
@@ -32,7 +97,41 @@ def _next_metrics(
         .limit(1)
         .scalar()
     )
-    return (max_cat or 0) + 1, (max_var or 0)
+    return max_var or 0
+
+
+def _normalize_context_cat_metric(
+    db_cdr: Session, instance_id: int, category: str
+) -> bool:
+    """Сводит все строки extensions.conf контекста к одному cat_metric."""
+    rows = (
+        db_cdr.query(AsteriskConf)
+        .filter(
+            AsteriskConf.instance_id == instance_id,
+            AsteriskConf.filename == EXTENSIONS_FILENAME,
+            AsteriskConf.category == category,
+            AsteriskConf.var_name == "exten",
+        )
+        .order_by(AsteriskConf.cat_metric, AsteriskConf.var_metric)
+        .all()
+    )
+    if not rows:
+        return False
+
+    cat_metrics = {row.cat_metric for row in rows}
+    if len(cat_metrics) <= 1:
+        return False
+
+    target_cat = min(cat_metrics)
+    changed = False
+    for var_metric, row in enumerate(rows, start=1):
+        if row.cat_metric != target_cat:
+            row.cat_metric = target_cat
+            changed = True
+        if row.var_metric != var_metric:
+            row.var_metric = var_metric
+            changed = True
+    return changed
 
 
 def _has_exten_pattern(
@@ -49,6 +148,22 @@ def _has_exten_pattern(
         )
         .first()
         is not None
+    )
+
+
+def _delete_exten_pattern(
+    db_cdr: Session, instance_id: int, category: str, pattern: str
+) -> int:
+    return (
+        db_cdr.query(AsteriskConf)
+        .filter(
+            AsteriskConf.instance_id == instance_id,
+            AsteriskConf.filename == EXTENSIONS_FILENAME,
+            AsteriskConf.category == category,
+            AsteriskConf.var_name == "exten",
+            AsteriskConf.var_val.like(f"{pattern},%"),
+        )
+        .delete(synchronize_session=False)
     )
 
 
@@ -76,46 +191,113 @@ def _insert_exten_rows(
         )
 
 
-def ensure_voicemail_dialplan(db_cdr: Session, instance_id: int) -> bool:
-    """
-    Добавляет *97 (VoiceMailMain) и перевод на VoiceMail после неудачного Dial.
-    Возвращает True, если были изменения.
-    """
-    changed = False
-
-    if not _has_exten_pattern(db_cdr, instance_id, "from-internal", "*97"):
-        cat_metric, _ = _next_metrics(db_cdr, instance_id, "from-internal")
-        _insert_exten_rows(
-            db_cdr,
-            instance_id,
-            "from-internal",
-            cat_metric,
-            [
-                "*97,1,NoOp(Доступ к голосовой почте)",
-                "*97,n,VoiceMailMain(${CALLERID(num)}@default)",
-                "*97,n,Hangup()",
-            ],
+def _777_is_complete(db_cdr: Session, instance_id: int, category: str) -> bool:
+    if not _has_exten_pattern(db_cdr, instance_id, category, "777"):
+        return False
+    for fragment in FULL_777_REQUIRED_FRAGMENTS:
+        if not (
+            db_cdr.query(AsteriskConf)
+            .filter(
+                AsteriskConf.instance_id == instance_id,
+                AsteriskConf.filename == EXTENSIONS_FILENAME,
+                AsteriskConf.category == category,
+                AsteriskConf.var_name == "exten",
+                AsteriskConf.var_val.like(f"%{fragment}%"),
+            )
+            .first()
+        ):
+            return False
+    old_style = (
+        db_cdr.query(AsteriskConf)
+        .filter(
+            AsteriskConf.instance_id == instance_id,
+            AsteriskConf.filename == EXTENSIONS_FILENAME,
+            AsteriskConf.category == category,
+            AsteriskConf.var_name == "exten",
+            AsteriskConf.var_val.like("777,%"),
         )
-        changed = True
+        .filter(
+            (AsteriskConf.var_val.like("%VoiceMail(101@default,u)%"))
+            | (AsteriskConf.var_val.like("%VoiceMail(101@default,b)%"))
+        )
+        .first()
+    )
+    return old_style is None
 
+
+def _ensure_777_in_context(
+    db_cdr: Session, instance_id: int, category: str, lines: list[str]
+) -> bool:
+    if _777_is_complete(db_cdr, instance_id, category):
+        return False
+
+    cat_metric = _context_cat_metric(db_cdr, instance_id, category)
+    _delete_exten_pattern(db_cdr, instance_id, category, "777")
+    start_var = _next_var_metric(db_cdr, instance_id, category)
+    _insert_exten_rows(
+        db_cdr, instance_id, category, cat_metric, lines, start_var_metric=start_var
+    )
+    return True
+
+
+def _vm_access_is_complete(
+    db_cdr: Session, instance_id: int, category: str, exten: str
+) -> bool:
+    return (
+        db_cdr.query(AsteriskConf)
+        .filter(
+            AsteriskConf.instance_id == instance_id,
+            AsteriskConf.filename == EXTENSIONS_FILENAME,
+            AsteriskConf.category == category,
+            AsteriskConf.var_name == "exten",
+            AsteriskConf.var_val.like(f"{exten},%"),
+            AsteriskConf.var_val.like("%Answer()%"),
+        )
+        .first()
+        is not None
+    )
+
+
+def _ensure_vm_access_codes(db_cdr: Session, instance_id: int) -> bool:
+    changed = False
+    for context in VM_CONTEXTS:
+        cat_metric = _context_cat_metric(db_cdr, instance_id, context)
+        for exten, lines in VM_ACCESS_EXTENSIONS:
+            if _vm_access_is_complete(db_cdr, instance_id, context, exten):
+                continue
+            _delete_exten_pattern(db_cdr, instance_id, context, exten)
+            start_var = _next_var_metric(db_cdr, instance_id, context)
+            _insert_exten_rows(
+                db_cdr,
+                instance_id,
+                context,
+                cat_metric,
+                lines,
+                start_var_metric=start_var,
+            )
+            changed = True
+    return changed
+
+
+def _ensure_xxx_voicemail(db_cdr: Session, instance_id: int) -> bool:
     if not _has_exten_pattern(db_cdr, instance_id, "from-internal", "_XXX"):
-        return changed
+        return False
 
-    has_vm = (
+    has_new = (
         db_cdr.query(AsteriskConf)
         .filter(
             AsteriskConf.instance_id == instance_id,
             AsteriskConf.filename == EXTENSIONS_FILENAME,
             AsteriskConf.category == "from-internal",
             AsteriskConf.var_name == "exten",
-            AsteriskConf.var_val.like("_XXX,%"),
-            AsteriskConf.var_val.like("%VoiceMail%"),
+            AsteriskConf.var_val == "_XXX,n,VoiceMail(${EXTEN}@default)",
         )
         .first()
     )
-    if has_vm:
-        return changed
+    if has_new:
+        return False
 
+    cat_metric = _context_cat_metric(db_cdr, instance_id, "from-internal")
     xxx_rows = (
         db_cdr.query(AsteriskConf)
         .filter(
@@ -125,23 +307,20 @@ def ensure_voicemail_dialplan(db_cdr: Session, instance_id: int) -> bool:
             AsteriskConf.var_name == "exten",
             AsteriskConf.var_val.like("_XXX,%"),
         )
-        .order_by(AsteriskConf.var_metric)
         .all()
     )
-    if not xxx_rows:
-        return changed
-
-    cat_metric = xxx_rows[0].cat_metric
-    max_var = max(row.var_metric for row in xxx_rows)
-
     for row in xxx_rows:
-        if row.var_val.endswith(",Hangup()") and "Dial(" in row.var_val:
+        val = row.var_val
+        if (
+            val.endswith(",Hangup()")
+            or "VoiceMail" in val
+            or "GotoIf" in val
+            or "vm_done" in val
+            or "vm_busy" in val
+        ):
             db_cdr.delete(row)
-            changed = True
-        elif row.var_val.endswith(",Hangup()") and "Dial(" not in row.var_val:
-            db_cdr.delete(row)
-            changed = True
 
+    start_var = _next_var_metric(db_cdr, instance_id, "from-internal")
     _insert_exten_rows(
         db_cdr,
         instance_id,
@@ -149,59 +328,40 @@ def ensure_voicemail_dialplan(db_cdr: Session, instance_id: int) -> bool:
         cat_metric,
         [
             '_XXX,n,GotoIf($["${DIALSTATUS}"="ANSWER"]?vm_done)',
-            "_XXX,n,VoiceMail(${EXTEN}@default,u)",
+            '_XXX,n,NoOp(internal VM DIALSTATUS=${DIALSTATUS})',
+            "_XXX,n,VoiceMail(${EXTEN}@default)",
+            "_XXX,n,Hangup()",
             "_XXX,n(vm_done),Hangup()",
         ],
-        start_var_metric=max_var,
+        start_var_metric=start_var,
     )
-    changed = True
+    return True
 
-    if _has_exten_pattern(db_cdr, instance_id, "from-external", "777"):
-        has_ext_vm = (
-            db_cdr.query(AsteriskConf)
-            .filter(
-                AsteriskConf.instance_id == instance_id,
-                AsteriskConf.filename == EXTENSIONS_FILENAME,
-                AsteriskConf.category == "from-external",
-                AsteriskConf.var_name == "exten",
-                AsteriskConf.var_val.like("777,%"),
-                AsteriskConf.var_val.like("%VoiceMail%"),
-            )
-            .first()
-        )
-        if not has_ext_vm:
-            ext_rows = (
-                db_cdr.query(AsteriskConf)
-                .filter(
-                    AsteriskConf.instance_id == instance_id,
-                    AsteriskConf.filename == EXTENSIONS_FILENAME,
-                    AsteriskConf.category == "from-external",
-                    AsteriskConf.var_name == "exten",
-                    AsteriskConf.var_val.like("777,%"),
-                )
-                .order_by(AsteriskConf.var_metric)
-                .all()
-            )
-            if ext_rows:
-                cat_metric = ext_rows[0].cat_metric
-                max_var = max(row.var_metric for row in ext_rows)
-                for row in ext_rows:
-                    if row.var_val.endswith(",Hangup()"):
-                        db_cdr.delete(row)
-                        changed = True
-                _insert_exten_rows(
-                    db_cdr,
-                    instance_id,
-                    "from-external",
-                    cat_metric,
-                    [
-                        '777,n,GotoIf($["${DIALSTATUS}"="ANSWER"]?ext_done)',
-                        "777,n,VoiceMail(101@default,u)",
-                        "777,n(ext_done),Hangup()",
-                    ],
-                    start_var_metric=max_var,
-                )
-                changed = True
+
+def ensure_voicemail_dialplan(db_cdr: Session, instance_id: int) -> bool:
+    """Обновляет диалплан voicemail; нормализует cat_metric для ODBC realtime."""
+    changed = False
+
+    for context in VM_CONTEXTS:
+        if _normalize_context_cat_metric(db_cdr, instance_id, context):
+            changed = True
+
+    if _ensure_vm_access_codes(db_cdr, instance_id):
+        changed = True
+    if _ensure_777_in_context(
+        db_cdr, instance_id, "from-internal", INTERNAL_777_LINES
+    ):
+        changed = True
+    if _ensure_777_in_context(
+        db_cdr, instance_id, "from-external", EXTERNAL_777_LINES
+    ):
+        changed = True
+    if _ensure_xxx_voicemail(db_cdr, instance_id):
+        changed = True
+
+    for context in VM_CONTEXTS:
+        if _normalize_context_cat_metric(db_cdr, instance_id, context):
+            changed = True
 
     if changed:
         db_cdr.commit()

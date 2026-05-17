@@ -276,7 +276,13 @@ async def create_instance(
                 transport_type,
             )
             from services.pjsip_disk_sync import write_pjsip_users_conf
+            from services.voicemail_config import seed_test_voicemail_boxes
+            from utils.voicemail_dialplan import ensure_voicemail_dialplan
 
+            seed_test_voicemail_boxes(
+                db_cdr, db_instance.id, db_instance.name, instance=db_instance
+            )
+            ensure_voicemail_dialplan(db_cdr, db_instance.id)
             write_pjsip_users_conf(db_instance, db_cdr)
 
         background_tasks.add_task(_start_asterisk_container_task, db_instance.id)
