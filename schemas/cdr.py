@@ -6,13 +6,13 @@ from typing import Optional
 class CDRRecord(BaseModel):
 
     dst: str
-    start: datetime
+    start: Optional[datetime]=None
     userfield: Optional[str]=None
     dcontext: str
-    answer: datetime
+    answer: Optional[datetime]=None
     sequence: int
     clid: str
-    end: datetime
+    end: Optional[datetime]=None
     channel: str
     duration: int
     dstchannel: Optional[str]=None
