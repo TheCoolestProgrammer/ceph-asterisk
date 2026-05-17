@@ -88,9 +88,15 @@ def reload_asterisk_config(
     manager reload — AMI/manager.conf; http reload — http.conf; core reload — остальное.
     """
     commands = (
+        "module reload res_config_odbc.so",
         "manager reload",
         "http reload",
         "module reload res_rtp_asterisk.so",
+        "module reload res_musiconhold.so",
+        "module reload res_pjsip.so",
+        "pjsip set logger on",
+        "pjsip reload",
+        "dialplan reload",
         "core reload",
     )
     results: list[ReloadResult] = []

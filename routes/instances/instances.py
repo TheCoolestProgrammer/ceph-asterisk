@@ -1,19 +1,44 @@
 from datetime import datetime
+import os
 import random
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 
-from database import get_db
+from database import get_db, get_cdr_db
 from models.asterisk_instance import AsteriskInstance
-from services.asterisk_reload import AsteriskReloadError, reload_asterisk_config
+from sqlalchemy import text
+
+from services.asterisk_reload import (
+    AsteriskReloadError,
+    reload_asterisk_config,
+    run_asterisk_cli,
+)
+from services.pjsip_schema import ensure_pjsip_schema
+from utils.dialplan_repair import repair_internal_dialplan, repair_queue_and_moh
+from services.instance_container import (
+    recreate_asterisk_container,
+    verify_instance_config_mount,
+    verify_instance_network,
+)
+from utils.instance_paths import docker_volume_config_dir, writable_config_dir
+from utils.pjsip_views import (
+    ps_aors_view_name,
+    ps_auths_view_name,
+    ps_endpoints_view_name,
+    sync_pjsip_views_for_instance,
+)
 
 router = APIRouter(prefix="/instances")
 
 
 @router.post("/{instance_id}/reload")
-async def reload_instance(instance_id: int, db: Session = Depends(get_db)):
+async def reload_instance(
+    instance_id: int,
+    db: Session = Depends(get_db),
+    db_cdr: Session = Depends(get_cdr_db),
+):
     """Перезагрузка конфигурации Asterisk"""
     instance = (
         db.query(AsteriskInstance).filter(AsteriskInstance.id == instance_id).first()
@@ -22,13 +47,222 @@ async def reload_instance(instance_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Instance not found")
 
     try:
+        schema_added = ensure_pjsip_schema(db_cdr)
+        sync_pjsip_views_for_instance(db, db_cdr, instance)
+        dialplan_fixed = repair_internal_dialplan(db_cdr, instance_id)
+        media_fixed = repair_queue_and_moh(db_cdr, instance_id)
         reload_asterisk_config(instance.name)
-        return {"message": "Configuration reloaded successfully (core + manager)"}
+        msg = "Configuration reloaded successfully (core + manager)"
+        if dialplan_fixed:
+            msg += "; internal dialplan repaired (Echo -> Dial)"
+        if media_fixed:
+            msg += "; queue/MOH dialplan repaired"
+        if schema_added:
+            msg += f"; schema columns added: {', '.join(schema_added)}"
+        return {"message": msg}
     except AsteriskReloadError as e:
         detail = e.message
         if e.stderr:
             detail = f"{detail}: {e.stderr}"
         raise HTTPException(status_code=500, detail=detail)
+
+
+@router.post("/{instance_id}/seed-test-users")
+async def seed_test_users(
+    instance_id: int,
+    db: Session = Depends(get_db),
+    db_cdr: Session = Depends(get_cdr_db),
+):
+    """Добавляет тестовых абонентов 101/102 (если ещё нет) и обновляет pjsip_users.conf."""
+    from services.instance_pjsip_seed import seed_default_pjsip_users
+    from services.pjsip_disk_sync import write_pjsip_users_conf
+
+    instance = (
+        db.query(AsteriskInstance).filter(AsteriskInstance.id == instance_id).first()
+    )
+    if not instance:
+        raise HTTPException(status_code=404, detail="Instance not found")
+
+    created = seed_default_pjsip_users(db_cdr, instance.name, "udp")
+    sync_pjsip_views_for_instance(db, db_cdr, instance)
+    write_pjsip_users_conf(instance, db_cdr)
+    try:
+        reload_asterisk_config(instance.name)
+    except AsteriskReloadError as e:
+        raise HTTPException(status_code=500, detail=e.message) from e
+
+    return {
+        "created": created,
+        "message": "Перезагрузите софтфоны: 101/strongpassword, 102/testpass102",
+    }
+
+
+@router.post("/{instance_id}/recreate-container")
+async def recreate_container(
+    instance_id: int,
+    db: Session = Depends(get_db),
+    db_cdr: Session = Depends(get_cdr_db),
+):
+    """
+    Пересоздаёт контейнер Asterisk с корректным bind-mount каталога конфигов.
+    Нужно, если /etc/asterisk в контейнере не совпадает с файлами на хосте.
+    """
+    instance = (
+        db.query(AsteriskInstance).filter(AsteriskInstance.id == instance_id).first()
+    )
+    if not instance:
+        raise HTTPException(status_code=404, detail="Instance not found")
+
+    try:
+        sync_pjsip_views_for_instance(db, db_cdr, instance)
+        volume_path = recreate_asterisk_container(instance, db)
+        reload_asterisk_config(instance.name)
+        mount = verify_instance_config_mount(instance)
+        return {
+            "message": "Container recreated",
+            "config_volume_host_path": volume_path,
+            "mount": mount,
+        }
+    except Exception as e:
+        instance.status = "error"
+        db.commit()
+        raise HTTPException(
+            status_code=500, detail=f"Failed to recreate container: {e}"
+        ) from e
+
+
+@router.get("/{instance_id}/pjsip-diagnose")
+async def pjsip_diagnose(
+    instance_id: int,
+    db: Session = Depends(get_db),
+    db_cdr: Session = Depends(get_cdr_db),
+):
+    """Проверка PJSIP realtime: VIEW, строки в БД, вывод `pjsip show endpoints`."""
+    instance = (
+        db.query(AsteriskInstance).filter(AsteriskInstance.id == instance_id).first()
+    )
+    if not instance:
+        raise HTTPException(status_code=404, detail="Instance not found")
+
+    schema_added = ensure_pjsip_schema(db_cdr)
+    sync_pjsip_views_for_instance(db, db_cdr, instance)
+
+    ep_view = ps_endpoints_view_name(instance_id)
+    aor_view = ps_aors_view_name(instance_id)
+    auth_view = ps_auths_view_name(instance_id)
+
+    def _count(view: str) -> int:
+        return db_cdr.execute(text(f"SELECT COUNT(*) FROM {view}")).scalar() or 0
+
+    endpoints_db = (
+        db_cdr.execute(
+            text(
+                f"""
+                SELECT e.id, e.aors, e.auth, e.context, e.transport,
+                       au.username, au.password
+                FROM {ep_view} e
+                JOIN {auth_view} au ON e.auth = au.id
+                """
+            )
+        )
+        .mappings()
+        .all()
+    )
+
+    cli: dict[str, str] = {}
+    cli_errors: dict[str, str] = {}
+    cli_commands = [
+        "odbc show",
+        "pjsip show registrations",
+        "pjsip show endpoints",
+        "dialplan show from-internal",
+    ]
+    for ep in endpoints_db:
+        cli_commands.append(f"pjsip show endpoint {ep['id']}")
+        cli_commands.append(f"pjsip show aor {ep['aors']}")
+    for cmd in cli_commands:
+        try:
+            result = run_asterisk_cli(instance.name, cmd, strict=False)
+            cli[cmd] = (result.stdout or result.stderr or "").strip()
+        except AsteriskReloadError as e:
+            cli_errors[cmd] = e.message
+
+    pjsip_users_path = ""
+    pjsip_users_preview = ""
+    config_dir = writable_config_dir(instance)
+    if not config_dir.startswith("ceph://"):
+        pjsip_users_path = os.path.join(config_dir, "pjsip_users.conf")
+        if os.path.isfile(pjsip_users_path):
+            with open(pjsip_users_path, encoding="utf-8") as f:
+                pjsip_users_preview = f.read()[:2000]
+
+    mount = verify_instance_config_mount(instance)
+    network = verify_instance_network(instance)
+
+    registrations_out = cli.get("pjsip show registrations", "")
+    endpoints_out = cli.get("pjsip show endpoints", "")
+    has_active_registration = (
+        "Registered" in registrations_out
+        or "Avail" in endpoints_out
+        or "Not in use" in endpoints_out
+    )
+
+    sip_accounts = [
+        {
+            "extension": row["id"],
+            "sip_username": row["username"],
+            "password": row["password"],
+            "aor": row["aors"],
+            "registered": row["aors"] in registrations_out and row["id"] in endpoints_out,
+        }
+        for row in endpoints_db
+    ]
+
+    return {
+        "instance": instance.name,
+        "writable_config_dir": config_dir,
+        "docker_volume_config_dir": docker_volume_config_dir(instance),
+        "config_mount": mount,
+        "network": network,
+        "db_config_path": instance.config_path,
+        "pjsip_users_conf_path": pjsip_users_path,
+        "pjsip_users_conf_preview": pjsip_users_preview,
+        "reg_server_filter": instance.name,
+        "views": {
+            "endpoints": ep_view,
+            "aors": aor_view,
+            "auths": auth_view,
+            "contacts_table": "ps_contacts (base, not VIEW)",
+        },
+        "counts": {
+            "endpoints_in_view": _count(ep_view),
+            "aors_in_view": _count(aor_view),
+            "auths_in_view": _count(auth_view),
+        },
+        "endpoints_in_db": [
+            {k: v for k, v in dict(row).items() if k != "password"} for row in endpoints_db
+        ],
+        "sip_accounts": sip_accounts,
+        "sip_server": {
+            "host": "<IP_сервера_debian>",
+            "port": instance.sip_port,
+            "transport": "UDP",
+            "context": "from-internal",
+        },
+        "registration_ok": has_active_registration,
+        "schema_columns_added": schema_added,
+        "asterisk_cli": cli,
+        "asterisk_cli_errors": cli_errors,
+        "hints": [
+            "pjsip show registrations пусто + Unavailable = Contact не сохранён; нужен contact=memory в sorcery.conf + reload",
+            "не звоните с 101 на 101 — нужны два софтфона (101 и 102)",
+            "«Удалённая сторона не найдена» = у callee нет Contact (не зарегистрирован)",
+            "POST /instances/{id}/seed-test-users — добавить 101 и 102, затем reload",
+            "8000 без звука: нужны RTP-порты (network.rtp_reachable) и res_musiconhold.so",
+            f"RTP UDP {instance.rtp_port_start}-{instance.rtp_port_end} должны быть проброшены в docker",
+            "dialplan: _XXX => Dial(PJSIP/${EXTEN}) в from-internal",
+        ],
+    }
 
 
 @router.post("{instance_id}/simulate-call")

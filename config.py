@@ -20,6 +20,7 @@ class Config(BaseSettings):
     ASTERISK_IMAGE_PATH:str
     
     PROJECT_PATH:str
+    HOST_PROJECT_PATH:str = ""
     CONFIG_FOLDER:str
     COMPOSE_FOLDER:str
     

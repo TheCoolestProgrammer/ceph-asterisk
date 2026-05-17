@@ -4,6 +4,8 @@ import yaml
 
 from config import config
 from models.asterisk_instance import AsteriskInstance
+from utils.instance_paths import docker_volume_config_dir
+from utils.instance_volumes import compose_sounds_volume
 
 
 class InstanceComposeError(Exception):
@@ -14,6 +16,17 @@ class InstanceComposeError(Exception):
 
 
 def build_compose_config(instance: AsteriskInstance) -> dict:
+    instance_config_path = docker_volume_config_dir(instance)
+    volumes = [
+        f"{instance_config_path}:/etc/asterisk:rw",
+        f"{instance_config_path}/drivers/odbc.ini:/etc/odbc.ini",
+        f"{instance_config_path}/drivers/odbcinst.ini:/etc/odbcinst.ini",
+        f"{instance_config_path}/asterisk_logs:/var/log/asterisk",
+    ]
+    sounds_volume = compose_sounds_volume(instance_config_path)
+    if sounds_volume:
+        volumes.insert(1, sounds_volume)
+
     return {
         "version": "3.8",
         "services": {
@@ -30,13 +43,7 @@ def build_compose_config(instance: AsteriskInstance) -> dict:
                     f"{instance.rtp_port_start}-{instance.rtp_port_end}:{instance.rtp_port_start}-{instance.rtp_port_end}/udp",
                     f"{instance.ami_port}:{instance.ami_port}",
                 ],
-                "volumes": [
-                    f"{config.PROJECT_PATH}/{config.CONFIG_FOLDER}/{instance.name}:/etc/asterisk:rw",
-                    f"{config.PROJECT_PATH}/{config.CONFIG_FOLDER}/sounds:/var/lib/asterisk/sounds/en:ro",
-                    f"{config.PROJECT_PATH}/{config.CONFIG_FOLDER}/{instance.name}/drivers/odbc.ini:/etc/odbc.ini",
-                    f"{config.PROJECT_PATH}/{config.CONFIG_FOLDER}/{instance.name}/drivers/odbcinst.ini:/etc/odbcinst.ini",
-                    f"{config.PROJECT_PATH}/{config.CONFIG_FOLDER}/{instance.name}/asterisk_logs:/var/log/asterisk",
-                ],
+                "volumes": volumes,
                 "networks": ["ceph-asterisk_default"],
                 "privileged": True,
             },
@@ -47,8 +54,8 @@ def build_compose_config(instance: AsteriskInstance) -> dict:
                 "environment": {"PBX_NAME": instance.name},
                 "networks": ["ceph-asterisk_default"],
                 "volumes": [
-                    f"/{config.PROJECT_PATH}/{config.COMPOSE_FOLDER}/filebeat-{instance.name}.yml:/usr/share/filebeat/filebeat.yml:ro",
-                    f"{config.PROJECT_PATH}/{config.CONFIG_FOLDER}/{instance.name}/asterisk_logs:/var/log/asterisk:ro",
+                    f"{config.PROJECT_PATH.rstrip('/')}/{config.COMPOSE_FOLDER}/filebeat-{instance.name}.yml:/usr/share/filebeat/filebeat.yml:ro",
+                    f"{instance_config_path}/asterisk_logs:/var/log/asterisk:ro",
                 ],
                 "depends_on": [instance.name],
             },

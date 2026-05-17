@@ -1,6 +1,5 @@
 import asyncio
 
-import docker
 import os
 import shutil
 import subprocess
@@ -10,23 +9,37 @@ from config import config
 
 from database import SessionLocal, get_cdr_db, get_db
 from models.asterisk_instance import AsteriskInstance
-from models.ast_conf import AsteriskConf
+from utils.ast_config_ini import seed_config_from_ini
 from utils.ast_config_views import (
-    ast_config_view_name,
+    build_extconfig_conf,
     create_ast_config_view,
     delete_ast_config_for_instance,
     drop_ast_config_view,
+)
+from utils.pjsip_views import (
+    create_pjsip_views,
+    drop_pjsip_views,
+    sync_pjsip_views_for_instance,
 )
 from services.ast_config_history import (
     apply_http_port_change,
     apply_manager_ami_port_change,
     apply_rtp_ports_change,
-    seed_http_config_rows,
-    seed_rtp_config_rows,
 )
+from services.instance_default_configs import (
+    get_db_config_templates,
+    get_disk_config_templates,
+)
+from services.instance_pjsip_seed import seed_default_pjsip_users
+from services.pjsip_schema import ensure_pjsip_schema
 from services.instance_compose import build_compose_config
+from services.instance_container import run_asterisk_container
 from services.instance_runtime import apply_instance_ports_runtime
-
+from utils.instance_paths import (
+    docker_volume_config_dir,
+    writable_config_dir,
+    writable_config_dir_for_name,
+)
 # from models.sip_user import SIPUser
 from schemas.asterisk import (
     AsteriskInstanceCreate,
@@ -215,9 +228,7 @@ async def create_instance(
         raise HTTPException(status_code=400, detail="Ports already in use")
 
     # Create config directory
-    config_dir = f"/app/{config.CONFIG_FOLDER}/{instance.name}"
-
-    os.makedirs(config_dir, exist_ok=True)
+    config_dir = writable_config_dir_for_name(instance.name)
     os.chmod(config_dir, 0o777)
 
     os.makedirs(f"{config_dir}/drivers", exist_ok=True)
@@ -247,38 +258,28 @@ async def create_instance(
             create_default_configs(
                 config_dir, instance, transport_type, db_cdr, db_instance.id
             )
+            ensure_pjsip_schema(db_cdr)
             create_ast_config_view(db_cdr, db_instance.id)
+            create_pjsip_views(db_cdr, db_instance.id, db_instance.name)
         except Exception:
             delete_ast_config_for_instance(db_cdr, db_instance.id)
             drop_ast_config_view(db_cdr, db_instance.id)
+            drop_pjsip_views(db_cdr, db_instance.id)
             db.delete(db_instance)
             db.commit()
             raise
 
-        background_tasks.add_task(start_asterisk_container, db_instance, db)
         if create_test_users:
-            test_users = [
-                {
-                    "username": "1001",
-                    "password": "test1001",
-                    "caller_id": "Test User 1",
-                    "account_code": "test",
-                    "context": "internal",
-                },
-                {
-                    "username": "1002",
-                    "password": "test1002",
-                    "caller_id": "Test User 2",
-                    "account_code": "test",
-                    "context": "internal",
-                },
-            ]
+            seed_default_pjsip_users(
+                db_cdr,
+                db_instance.name,
+                transport_type,
+            )
+            from services.pjsip_disk_sync import write_pjsip_users_conf
 
-            for user_data in test_users:
-                # db_user = SIPUser(**user_data, instance_name=db_instance.name)
-                db.add(db_user)
+            write_pjsip_users_conf(db_instance, db_cdr)
 
-            db.commit()
+        background_tasks.add_task(_start_asterisk_container_task, db_instance.id)
 
         return db_instance
 
@@ -533,6 +534,7 @@ def delete_instance(
 
         delete_ast_config_for_instance(db_cdr, instance_id)
         drop_ast_config_view(db_cdr, instance_id)
+        drop_pjsip_views(db_cdr, instance_id)
 
         db.delete(instance)
         db.commit()
@@ -557,257 +559,16 @@ def create_default_configs(
     db_cdr: Session,
     instance_id: int,
 ):
-    """Создание конфигурационных файлов с правильными правами"""
+    """Сидирует конфиги в ast_config и пишет на диск только bootstrap-файлы."""
 
-    # Создаем директорию если не существует
-    # os.makedirs(config_dir, exist_ok=True)
-
-    configs = {
-        f"asterisk.conf": f"""[directories]
-astetcdir => /etc/asterisk
-astmoddir => /usr/lib/asterisk/modules
-astvarlibdir => /var/lib/asterisk
-astdbdir => /var/lib/asterisk
-astkeydir => /var/lib/asterisk
-astdatadir => /var/lib/asterisk
-astagidir => /var/lib/asterisk/agi-bin
-astspooldir => /var/spool/asterisk
-astrundir => /var/run/asterisk
-astlogdir => /var/log/asterisk
-
-[options]
-verbose = 3
-debug = 0
-maxfiles = 100000
-systemname = {instance.name}
-            """,
-        "logger.conf": """[general]
-dateformat=%F %T
-[logfiles]
-console => error,warning,notice
-messages => notice,warning,error
-                    """,
-        "modules.conf": """[modules]
-autoload = yes
-load => pbx_config.so
-load => app_dial.so
-load => app_playback.so
-load => res_rtp_asterisk.so
-load => codec_ulaw.so
-load => codec_alaw.so
-load => format_wav.so
-load => res_odbc.so
-load => res_config_odbc.so
-load => cdr_adaptive_odbc.so
-            
-            """,
-        "pjsip.conf": f"""[global]
-endpoint_identifier_order=username,ip,anonymous
-
-[transport-{transport_type}]
-type=transport
-protocol={transport_type}
-bind=0.0.0.0:{instance.sip_port}
-{"async_operations=1" if transport_type == "tcp" else ""}
-[101]
-type=endpoint
-context=from-internal
-disallow=all
-allow=ulaw,alaw
-auth=101-auth
-aors=101-aor
-
-[101-auth]
-type=auth
-auth_type=userpass
-password=strongpassword  ; Ваш пароль
-username=101
-
-[101-aor]
-type=aor
-max_contacts=1
-default_expiration=3600
-
-[200]
-type=endpoint
-context=from-external ; Важно! У внешних звонков должен быть свой контекст
-disallow=all
-allow=ulaw,alaw
-auth=200-auth
-aors=200-aor
-direct_media=no
-
-[200-auth]
-type=auth
-auth_type=userpass
-password=customerpass
-username=200
-
-[200-aor]
-type=aor
-max_contacts=1
-        """,
-        "extensions.conf": """[from-internal]
-exten => _XXX,1,NoOp(Звонок на внутренний номер ${EXTEN})
-same => n,Answer()
-same => n,Playback(hello-morgen.wav)
-same => n, Echo()
-same => n,Hangup()
-
-[from-external]
-exten => 777,1,NoOp(Входящий звонок от клиента ${CALLERID(all)})
-same => n,Answer()
-same => n,Dial(PJSIP/101,20)
-same => n,Hangup()
-            """,
-        "stasis.conf": """[general]
-enabled=no
-            """,
-        "cdr.conf": f"""[general]
-enable=yes
-unanswered=yes
-
-; CDR в CSV файл
-[csv]
-usegmtime=yes
-loguniqueid=yes
-loguserfield=yes
-            """,
-        "drivers/odbc.ini": f"""[{config.DSN}]
-Description = MySQL connection to Asterisk
-Driver      = MySQL
-Database    = {config.MYSQL_DATABASE_CDR}
-Server      = {config.MYSQL_CONTAINER_NAME}
-User        = {config.MYSQL_ASTERISK_USER}
-Password    = {config.MYSQL_ASTERISK_USER_PASSWORD}
-Port        = {config.MYSQL_PORT}
-        """,
-        "drivers/odbcinst.ini": f"""[MySQL]
-Description = ODBC for MySQL
-Driver      = /usr/lib/x86_64-linux-gnu/odbc/libmaodbc.so
-FileUsage   = 1
-        """,
-        "res_odbc.conf": f"""[{config.ASTERISK_ODBC_ID}]            ; Имя, которое вы дадите этому линку в Asterisk
-enabled => yes
-dsn => {config.DSN} ; Должно совпадать с именем в /etc/odbc.ini
-username => {config.MYSQL_ASTERISK_USER}
-password => {config.MYSQL_ASTERISK_USER_PASSWORD}
-pre-connect => yes
-        """,
-        "cdr_adaptive_odbc.conf": f"""[mysql]
-connection={config.ASTERISK_ODBC_ID}  ; Имя из res_odbc.conf
-table={config.MYSQL_CDR_TABLE}              ; Имя таблицы в БД
-            """,
-        #         "manager.conf": f"""
-        # [general]
-        # enabled = yes
-        # port = {instance.ami_port}
-        # bindaddr = 0.0.0.0
-        # [{config.MYSQL_ASTERISK_USER}]
-        # secret = {config.MYSQL_ASTERISK_USER_PASSWORD}
-        # read = system,call,config
-        # write = system,call,config,command
-        #         """,
-        "sorcery.conf": f"""[res_pjsip]
-endpoint=config,pjsip.conf
-endpoint=realtime,ps_endpoints
-auth=config,pjsip.conf
-auth=realtime,ps_auths
-aor=config,pjsip.conf
-aor=realtime,ps_aors
-contact=realtime,ps_contacts
-
-[res_pjsip_endpoint_identifier_ip]
-identify=config,pjsip.conf
-identify=realtime,ps_endpoint_id_ips
-[res_pjsip_endpoint_identifier_user]
-endpoint=realtime,ps_endpoints
-        """,
-        "extconfig.conf": f"""[settings]
-; имя_объекта => драйвер,имя_коннектора_из_res_odbc,имя_таблицы
-ps_endpoints => odbc,{config.ASTERISK_ODBC_ID},ps_endpoints
-ps_auths => odbc,{config.ASTERISK_ODBC_ID},ps_auths
-ps_aors => odbc,{config.ASTERISK_ODBC_ID},ps_aors
-ps_domain_aliases => odbc,{config.ASTERISK_ODBC_ID},ps_domain_aliases
-ps_endpoint_id_ips => odbc,{config.ASTERISK_ODBC_ID},ps_endpoint_id_ips
-ps_contacts => odbc,{config.ASTERISK_ODBC_ID},ps_contacts
-
-manager.conf => odbc,{config.ASTERISK_ODBC_ID},{ast_config_view_name(instance_id)}
-rtp.conf => odbc,{config.ASTERISK_ODBC_ID},{ast_config_view_name(instance_id)}
-http.conf => odbc,{config.ASTERISK_ODBC_ID},{ast_config_view_name(instance_id)}
-    """,
-    }
-    manager_conf = [
-        {
-            "general": f"""
-    enabled = yes
-    port = {instance.ami_port}
-    bindaddr = 0.0.0.0
-    """
-        },
-        {
-            f"{config.MYSQL_ASTERISK_USER}": f"""
-    secret = {config.MYSQL_ASTERISK_USER_PASSWORD}
-    read = system,call,config
-    write = system,call,config,command
-    """
-        },
-    ]
-    for category in range(len(manager_conf)):
-        for category_name, strings in manager_conf[category].items():
-            var_metric = 0
-            for string in strings.splitlines():
-                # Пропускаем пустые строки и строки без знака равенства
-                if "=" not in string:
-                    continue
-
-                var_metric += 1
-                parts = string.split("=", 1)  # Ограничиваем разбиение одним знаком =
-
-                mgr_conf = AsteriskConf(
-                    instance_id=instance_id,
-                    filename="manager.conf",
-                    category=category_name,
-                    var_name=parts[0].strip(),
-                    var_val=parts[1].strip(),
-                    cat_metric=category + 1,
-                    var_metric=var_metric,
-                )
-                db_cdr.add(mgr_conf)
-
-    seed_http_config_rows(db_cdr, instance_id, instance.http_port)
-    seed_rtp_config_rows(
-        db_cdr, instance_id, instance.rtp_port_start, instance.rtp_port_end
-    )
+    for filename, content in get_db_config_templates(instance, transport_type).items():
+        seed_config_from_ini(db_cdr, instance_id, filename, content)
     db_cdr.commit()
-    # log_conf1 = AsteriskConf(
-    #     filename="logger.conf",
-    #     category="general",
-    #     var_name="dateformat",
-    #     var_val="%F %T",
-    #     cat_metric=1,
-    #     var_metric=1,
-    # )
-    # log_conf2 = AsteriskConf(
-    #     filename="logger.conf",
-    #     category="logfiles",
-    #     var_name="console",
-    #     var_val="error,warning,notice",
-    #     cat_metric=2,
-    #     var_metric=1,
-    # )
-    # log_conf3 = AsteriskConf(
-    #     filename="logger.conf",
-    #     category="logfiles",
-    #     var_name="messages",
-    #     var_val="notice,warning,error",
-    #     cat_metric=2,
-    #     var_metric=2,
-    # )
-    # db_cdr.add_all([log_conf1, log_conf2, log_conf3])
-    # db_cdr.commit()
 
-    for filename, content in configs.items():
+    disk_configs = get_disk_config_templates(instance, transport_type)
+    disk_configs["extconfig.conf"] = build_extconfig_conf(instance_id)
+
+    for filename, content in disk_configs.items():
         filepath = os.path.join(config_dir, filename)
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
@@ -863,60 +624,24 @@ http.conf => odbc,{config.ASTERISK_ODBC_ID},{ast_config_view_name(instance_id)}
         yaml.dump(filebeat_config, f)
 
 
+def _start_asterisk_container_task(instance_id: int) -> None:
+    db = SessionLocal()
+    try:
+        instance = (
+            db.query(AsteriskInstance)
+            .filter(AsteriskInstance.id == instance_id)
+            .first()
+        )
+        if instance is None:
+            return
+        start_asterisk_container(instance, db)
+    finally:
+        db.close()
+
+
 def start_asterisk_container_by_library(instance: AsteriskInstance, db: Session):
-
-    client = docker.from_env()
-
     try:
-        image = client.images.get(config.ASTERISK_IMAGE_TAG)
-
-    except docker.errors.ImageNotFound:
-        image, logs = client.images.build(
-            path=config.ASTERISK_IMAGE_PATH, tag=config.ASTERISK_IMAGE_TAG
-        )
-
-    base_path = os.path.abspath(instance.config_path)
-    try:
-        port_bindings = {
-            f"{instance.sip_port}/udp": instance.sip_port,
-            f"{instance.sip_port}/tcp": instance.sip_port,
-            f"{instance.http_port}/tcp": instance.http_port,
-        }
-
-        # Добавляем RTP порты (диапазон)
-        rtp_ports = {}
-        for port in range(instance.rtp_port_start, instance.rtp_port_end + 1):
-            rtp_ports[f"{port}/udp"] = port
-
-        # Объединяем все порты
-        port_bindings.update(rtp_ports)
-
-        container = client.containers.run(
-            image=image,
-            name=f"{instance.name}",
-            detach=True,
-            privileged=True,
-            ports=port_bindings,
-            network="ceph-asterisk_default",
-            # Монтирование томов (Volumes)
-            volumes={
-                f"{base_path}": {"bind": "/etc/asterisk", "mode": "rw"},
-                f"{base_path}/sounds": {
-                    "bind": "/var/lib/asterisk/sounds/en",
-                    "mode": "ro",
-                },
-                f"{base_path}/drivers/odbc.ini": {
-                    "bind": "/etc/odbc.ini",
-                    "mode": "ro",
-                },
-                f"{base_path}/drivers/odbcinst.ini": {
-                    "bind": "/etc/odbcinst.ini",
-                    "mode": "ro",
-                },
-            },
-        )
-        instance.status = "running"
-        db.commit()
+        run_asterisk_container(instance, db)
         print(f"Контейнер {instance.name} запущен успешно")
     except Exception as e:
         instance.status = "error"
@@ -963,34 +688,22 @@ def start_asterisk_container_by_library(instance: AsteriskInstance, db: Session)
 
 
 def start_asterisk_container(instance: AsteriskInstance, db: Session):
-    compose_path = f"/app/{config.COMPOSE_FOLDER}/"
-    os.makedirs(compose_path, exist_ok=True)
+    """Запуск контейнера с volume {HOST_PROJECT_PATH}/asterisk_configs/{name}."""
+    from services.instance_container import remove_asterisk_container
 
-    filename = f"docker-compose-{instance.name}.yml"
-    with open(f"{compose_path}/{filename}", "w", encoding="utf-8") as f:
-        yaml.dump(build_compose_config(instance), f)
+    config_dir = docker_volume_config_dir(instance)
+    print(f"Проверка конфигов в {config_dir}:")
+    if os.path.isdir(config_dir):
+        for file in os.listdir(config_dir):
+            filepath = os.path.join(config_dir, file)
+            if os.path.isfile(filepath):
+                print(f"  {file} - {os.path.getsize(filepath)} bytes")
 
-    # Перед запуском проверяем что файлы созданы
-    print(f"Проверка конфигов в {instance.config_path}:")
-    for file in os.listdir(instance.config_path):
-        filepath = os.path.join(instance.config_path, file)
-        if os.path.isfile(filepath):
-            print(f"  {file} - {os.path.getsize(filepath)} bytes")
-
-    # Запускаем контейнер
-    result = subprocess.run(
-        ["docker", "compose", "-f", filename, "up", "-d"],
-        cwd=compose_path,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-
-    if result.returncode == 0:
-        instance.status = "running"
-        db.commit()
-        print(f"Контейнер {instance.name} запущен успешно")
-    else:
+    try:
+        remove_asterisk_container(instance.name)
+        run_asterisk_container(instance, db)
+        print(f"Контейнер {instance.name} запущен, volume {config_dir}:/etc/asterisk")
+    except Exception as e:
         instance.status = "error"
         db.commit()
-        print(f"Ошибка запуска: {result.stderr}")
+        print(f"Ошибка запуска: {e}")

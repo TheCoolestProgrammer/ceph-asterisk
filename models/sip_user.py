@@ -77,7 +77,8 @@ class PjsipEndpoint(BaseCDR):
     id = Column(String(40))  # Имя: '101'
     transport = Column(String(40), default='transport-udp')
  
-    aors = Column(String(200))                 # Ссылка на ID в ps_aors
+    # Имя AOR в ps_aors (поле id) = extension (101), нужно для SIP REGISTER To: 101@...
+    aors = Column(String(200))
     auth = Column(String(40))                 # Ссылка на ID в ps_auths
     # так как эти двое требуют строковое представление,
     # то воодим нормальные ключи
@@ -93,6 +94,7 @@ class PjsipEndpoint(BaseCDR):
     rtp_symmetric = Column(Enum(Choise), default=Choise.YES)
     force_rport = Column(Enum(Choise), default=Choise.YES)
     mwi_from_user = Column(String(40))
+    mailboxes = Column(String(80), nullable=True)
 
     # это для отправки callerid. он будет сравнивать заголовки  и в зависимости от статуса
     # будет использовать имя из таблицы или из софтофона

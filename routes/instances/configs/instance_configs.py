@@ -1,80 +1,105 @@
-from fastapi import APIRouter, Depends, HTTPException, Path
+import os
+
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from database import get_db, get_cdr_db
-from models.asterisk_instance import AsteriskInstance, CallerIdModes
-from models.sip_user import PjsipEndpoint, Choise, PjsipAor
+from models.asterisk_instance import AsteriskInstance
+from models.ast_conf import AsteriskConf
 from schemas.asterisk import ConfigUpdate
+from utils.ast_config_ini import (
+    STATIC_REALTIME_CONF_FILES,
+    replace_config_from_ini,
+    rows_to_ini_content,
+)
+from utils.instance_paths import writable_config_dir
 
 router = APIRouter(prefix="/instances/{instance_id}/config")
 
 
-# @router.post("/change_inbound_status")
-# async def change_inbound_status(choise:CallerIdModes, instance_id:int=Path(...),db:Session=Depends(get_db) ,cdr_db: Session = Depends(get_cdr_db)):
-#     instance = db.get(AsteriskInstance, instance_id)
-#     if not instance:
-#         raise HTTPException(status_code=404, detail="Instance not found")
-#     instance.inbound_mode = choise
+def _config_filename(config_type: str) -> str:
+    return config_type if config_type.endswith(".conf") else f"{config_type}.conf"
 
-#     new_value = Choise.YES if choise == CallerIdModes.ON else Choise.NO
-#     new_value_rev = Choise.NO if choise == CallerIdModes.ON else Choise.YES
 
-#     subquery = cdr_db.query(PjsipEndpoint.id).join(PjsipEndpoint.aors_fk).filter(
-#         PjsipAor.reg_server == instance.name
-#     ).subquery()
+def _is_db_config(filename: str) -> bool:
+    return filename in STATIC_REALTIME_CONF_FILES
 
-#     cdr_db.query(PjsipEndpoint).filter(PjsipEndpoint.id.in_(subquery)).update(
-#     {
-#         PjsipEndpoint.trust_id_inbound: new_value,
-#         PjsipEndpoint.trust_id_outbound: new_value_rev
-#     },
-#     synchronize_session=False
-# )
-    # db.query(PjsipEndpoint).filter(PjsipEndpoint.aors_fk.res_server==instance.name).update({PjsipEndpoint.trust_id_inbound: new_value})
-    # db.query(PjsipEndpoint).update({PjsipEndpoint.trust_id_outbound: new_value_rev})
-    # db.commit()
-    # cdr_db.commit()
 
 @router.put("")
 async def update_config(
-    instance_id: int, config_update: ConfigUpdate, db: Session = Depends(get_db)
+    instance_id: int,
+    config_update: ConfigUpdate,
+    db: Session = Depends(get_db),
+    db_cdr: Session = Depends(get_cdr_db),
 ):
-    """Обновление конфигурационного файла"""
+    """Обновление конфигурационного файла (БД или диск)."""
     instance = (
         db.query(AsteriskInstance).filter(AsteriskInstance.id == instance_id).first()
     )
     if not instance:
         raise HTTPException(status_code=404, detail="Instance not found")
 
-    config_file = f"{instance.config_path}/{config_update.config_type}.conf"
+    filename = _config_filename(config_update.config_type)
+
+    if _is_db_config(filename):
+        try:
+            replace_config_from_ini(
+                db_cdr, instance_id, filename, config_update.content
+            )
+            db_cdr.commit()
+        except Exception as e:
+            db_cdr.rollback()
+            raise HTTPException(
+                status_code=500, detail=f"Failed to update config in DB: {str(e)}"
+            )
+        return {"message": f"Config {filename} updated successfully (database)"}
+
+    config_file = os.path.join(writable_config_dir(instance), filename)
 
     try:
         with open(config_file, "w") as f:
             f.write(config_update.content)
-        return {
-            "message": f"Config {config_update.config_type}.conf updated successfully"
-        }
+        return {"message": f"Config {filename} updated successfully"}
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to update config: {str(e)}"
         )
 
 
-@router.get("{config_type}")
-async def get_config(instance_id: int, config_type: str, db: Session = Depends(get_db)):
-    """Получение содержимого конфигурационного файла"""
+@router.get("/{config_type}")
+async def get_config(
+    instance_id: int, config_type: str, db: Session = Depends(get_db), db_cdr: Session = Depends(get_cdr_db)
+):
+    """Получение содержимого конфигурационного файла (БД или диск)."""
     instance = (
         db.query(AsteriskInstance).filter(AsteriskInstance.id == instance_id).first()
     )
     if not instance:
         raise HTTPException(status_code=404, detail="Instance not found")
 
-    config_file = f"{instance.config_path}/{config_type}.conf"
+    filename = _config_filename(config_type)
+
+    if _is_db_config(filename):
+        rows = (
+            db_cdr.query(AsteriskConf)
+            .filter(
+                AsteriskConf.instance_id == instance_id,
+                AsteriskConf.filename == filename,
+            )
+            .order_by(AsteriskConf.cat_metric, AsteriskConf.var_metric)
+            .all()
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Config not found in database")
+        content = rows_to_ini_content(rows)
+        return {"config_type": config_type, "content": content, "source": "database"}
+
+    config_file = os.path.join(writable_config_dir(instance), filename)
 
     try:
         with open(config_file, "r") as f:
             content = f.read()
-        return {"config_type": config_type, "content": content}
+        return {"config_type": config_type, "content": content, "source": "disk"}
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Config file not found")
     except Exception as e:

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Path
 from database import get_db, get_cdr_db
 from models.asterisk_instance import AsteriskInstance
 from models.sip_user import PjsipEndpoint, PjsipAor, PjsipAuth
+from services.pjsip_disk_sync import _format_callerid, write_pjsip_users_conf
 # from schemas.asterisk import SIPUserCreate, SIPUserResponse, SIPUserUpdate
 from sqlalchemy.orm import Session, joinedload
 from schemas.sip import SIPUserCreate,AuthSchema, AorSchema, SIPUserItem,SIPUserResponse, AuthUpdate, AorUpdate, SIPUserUpdate
@@ -48,9 +49,9 @@ def create_sip_user(user_data: SIPUserCreate,
     try:
         # 1. Создаем AOR (регистрация)
         new_aor = PjsipAor(
-            id=f"{user_data.username}-aor",
+            id=user_data.username,
             max_contacts=user_data.max_contacts,
-            reg_server=instance.name
+            reg_server=instance.name,
         )
         
         # 2. Создаем Auth (пароль)
@@ -65,18 +66,19 @@ def create_sip_user(user_data: SIPUserCreate,
         # 3. Создаем Endpoint (логика)
         new_endpoint = PjsipEndpoint(
             id=user_data.username,
-            aors=f"{user_data.username}-aor",
+            aors=user_data.username,
             auth=f"{user_data.username}-auth",
             auths_id=new_auth.pk,
             aors_id=new_aor.pk,
             context=user_data.context,
             transport=f"transport-{user_data.transport.value}",
-            callerid=f"{user_data.callerid} / <{user_data.username}>"
+            callerid=_format_callerid(user_data.callerid, user_data.username),
         )
 
         cdr_db.add(new_endpoint)
         cdr_db.commit()
-        
+        write_pjsip_users_conf(instance, cdr_db)
+
         return {"status": "success", "username": user_data.username}
     
     except Exception as e:
@@ -166,6 +168,7 @@ async def update_sip_user_by_creds(
 
         cdr_db.commit()
         cdr_db.refresh(endpoint)
+        write_pjsip_users_conf(instance, cdr_db)
         return endpoint
 
     except Exception as e:
@@ -214,6 +217,7 @@ async def delete_sip_user(
             cdr_db.delete(aor_obj)
 
         cdr_db.commit()
+        write_pjsip_users_conf(instance, cdr_db)
         return {"message":"success"} # При 204 коде тело ответа не возвращается
 
     except Exception as e:
