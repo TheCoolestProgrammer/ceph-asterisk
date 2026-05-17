@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import Base, engine, BaseCDR, engine_cdr
-from routes import cdr, users, auth
+from routes import cdr, users, auth, queues
 from routes.instances import instances, instancesCRUD
 from routes.instances.configs import instance_configs
 from routes import logs
@@ -31,6 +31,7 @@ app.add_middleware(
 
 app.include_router(cdr.router)
 app.include_router(users.router)
+app.include_router(queues.router)
 app.include_router(instancesCRUD.router)
 app.include_router(instances.router)
 app.include_router(instance_configs.router)
