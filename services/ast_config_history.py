@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, defer
 
 from models.ast_conf import AsteriskConf
 from models.ast_conf_history import AsteriskConfigHistory
+from utils.ast_config_ini import snapshot_rows_to_ini_content
 
 MANAGER_CONF_FILENAME = "manager.conf"
 RTP_CONF_FILENAME = "rtp.conf"
@@ -360,6 +361,32 @@ def apply_manager_ami_port_change(
         )
     session.refresh(port_row)
     return port_row
+
+
+def get_history_version_content(
+    session: Session,
+    instance_id: int,
+    filename: str,
+    version: int,
+) -> tuple[AsteriskConfigHistory, str]:
+    """Загружает запись истории и возвращает текст .conf для указанной версии."""
+    entry = (
+        session.query(AsteriskConfigHistory)
+        .filter(
+            AsteriskConfigHistory.instance_id == instance_id,
+            AsteriskConfigHistory.filename == filename,
+            AsteriskConfigHistory.version == version,
+        )
+        .first()
+    )
+    if entry is None:
+        raise ValueError(
+            f"Version {version} of {filename} not found for instance_id={instance_id}"
+        )
+
+    snapshot_rows = _parse_snapshot(entry.config_snapshot)
+    content = snapshot_rows_to_ini_content(snapshot_rows, filename)
+    return entry, content
 
 
 def get_file_history(

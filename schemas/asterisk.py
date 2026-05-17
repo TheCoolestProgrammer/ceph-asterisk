@@ -119,6 +119,54 @@ class ConfigUpdate(BaseModel):
     content: str
 
 
+class ConfigHistoryEntry(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    instance_id: int
+    filename: str
+    version: int
+    description: Optional[str] = None
+    created_at: datetime
+    author: str
+
+
+class ConfigHistoryListResponse(BaseModel):
+    config_type: str
+    filename: str
+    items: list[ConfigHistoryEntry]
+
+
+class ConfigHistoryVersionContent(BaseModel):
+    config_type: str
+    filename: str
+    version: int
+    history_id: int
+    description: Optional[str] = None
+    created_at: datetime
+    author: str
+    content: str
+    source: str = "history"
+
+
+class ConfigRollbackRequest(BaseModel):
+    """Откат к версии из ast_config_history (укажите history_id или version)."""
+
+    history_id: Optional[int] = None
+    version: Optional[int] = None
+    change_author: Optional[str] = "api"
+    reload_asterisk: bool = True
+
+
+class ConfigRollbackResponse(BaseModel):
+    message: str
+    filename: str
+    restored_version: int
+    history_id: int
+    rows_restored: int
+    snapshot_saved_version: Optional[int] = None
+
+
 # class SIPUserCreate(BaseModel):
 #     username: str
 #     password: str

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Sequence
+
 from sqlalchemy.orm import Session
 
 from models.ast_conf import AsteriskConf
@@ -104,7 +106,30 @@ def _format_config_line(row: AsteriskConf) -> str:
     return f"{row.var_name}{sep}{row.var_val}"
 
 
-def rows_to_ini_content(rows: list[AsteriskConf]) -> str:
+class _IniRowView:
+    """Минимальный вид строки ast_config для сборки .conf из снапшота истории."""
+
+    __slots__ = ("filename", "category", "var_name", "var_val", "cat_metric", "var_metric")
+
+    def __init__(self, data: dict, default_filename: str) -> None:
+        self.filename = data.get("filename", default_filename)
+        self.category = str(data.get("category", "general"))
+        self.var_name = str(data["var_name"])
+        self.var_val = str(data["var_val"])
+        self.cat_metric = int(data.get("cat_metric", 0))
+        self.var_metric = int(data.get("var_metric", 0))
+
+
+def snapshot_rows_to_ini_content(rows: list[dict], filename: str) -> str:
+    """Собирает текст .conf из JSON-снапшота ast_config_history."""
+    ordered = sorted(
+        [_IniRowView(row, filename) for row in rows],
+        key=lambda row: (row.cat_metric, row.var_metric),
+    )
+    return rows_to_ini_content(ordered)
+
+
+def rows_to_ini_content(rows: Sequence[AsteriskConf | _IniRowView]) -> str:
     """Собирает текст .conf из строк ast_config."""
     lines: list[str] = []
     prev_category: str | None = None
