@@ -83,7 +83,12 @@ async def seed_test_users(
     if not instance:
         raise HTTPException(status_code=404, detail="Instance not found")
 
+    from services.voicemail_config import seed_test_voicemail_boxes
+
     created = seed_default_pjsip_users(db_cdr, instance.name, "udp")
+    vm_created = seed_test_voicemail_boxes(
+        db_cdr, instance_id, instance.name, instance=instance
+    )
     sync_pjsip_views_for_instance(db, db_cdr, instance)
     write_pjsip_users_conf(instance, db_cdr)
     try:
@@ -93,7 +98,9 @@ async def seed_test_users(
 
     return {
         "created": created,
-        "message": "Перезагрузите софтфоны: 101/strongpassword, 102/testpass102",
+        "voicemail_created": vm_created,
+        "message": "Перезагрузите софтфоны: 101/strongpassword, 102/testpass102. "
+        "Голосовая почта: наберите *97, PIN 4242.",
     }
 
 

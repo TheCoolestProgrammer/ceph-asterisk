@@ -60,8 +60,13 @@ def get_db_config_templates(
         "extensions.conf": """[from-internal]
 exten => _XXX,1,NoOp(Звонок ${CALLERID(num)} -> ${EXTEN})
 exten => _XXX,n,Dial(PJSIP/${EXTEN},30)
-exten => _XXX,n,NoOp(DIALSTATUS=${DIALSTATUS})
-exten => _XXX,n,Hangup()
+exten => _XXX,n,GotoIf($["${DIALSTATUS}"="ANSWER"]?vm_done)
+exten => _XXX,n,VoiceMail(${EXTEN}@default,u)
+exten => _XXX,n(vm_done),Hangup()
+
+exten => *97,1,NoOp(Доступ к голосовой почте)
+exten => *97,n,VoiceMailMain(${CALLERID(num)}@default)
+exten => *97,n,Hangup()
 
 exten => 8000,1,NoOp(Очередь test-support)
 exten => 8000,n,Answer()
@@ -72,7 +77,24 @@ exten => 8000,n,Hangup()
 exten => 777,1,NoOp(Входящий звонок от клиента ${CALLERID(all)})
 exten => 777,n,Answer()
 exten => 777,n,Dial(PJSIP/101,20)
-exten => 777,n,Hangup()
+exten => 777,n,GotoIf($["${DIALSTATUS}"="ANSWER"]?ext_done)
+exten => 777,n,VoiceMail(101@default,u)
+exten => 777,n(ext_done),Hangup()
+""",
+        "voicemail.conf": """[general]
+format = wav49|gsm|wav
+serveremail = asterisk
+attach = yes
+skipms = 3000
+maxsilence = 10
+minmessage = 1
+maxmessage = 300
+sendvoicemail = yes
+review = yes
+
+[default]
+101 => 4242,Test Operator 101
+102 => 4242,Test Operator 102
 """,
         "queues.conf": """[general]
 persistentmembers = yes
@@ -170,6 +192,7 @@ preload => res_odbc.so
 preload => res_config_odbc.so
 load => pbx_config.so
 load => app_dial.so
+load => app_voicemail.so
 load => app_playback.so
 load => app_queue.so
 load => app_stack.so

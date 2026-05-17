@@ -174,11 +174,13 @@ def sync_pjsip_views_for_instance(
 ) -> None:
     """VIEW в БД, extconfig.conf и pjsip_users.conf для инстанса."""
     from services.instance_media import ensure_media_modules, write_musiconhold_conf
+    from services.voicemail_modules import ensure_voicemail_modules
     from services.pjsip_disk_sync import write_pjsip_sorcery_conf, write_pjsip_users_conf
     from utils.pjsip_aor_repair import repair_aor_ids_for_instance
 
     repair_aor_ids_for_instance(db_cdr, instance.name)
     ensure_media_modules(instance)
+    ensure_voicemail_modules(instance)
     write_musiconhold_conf(instance)
     create_pjsip_views(db_cdr, instance.id, instance.name)
     write_instance_extconfig(instance)

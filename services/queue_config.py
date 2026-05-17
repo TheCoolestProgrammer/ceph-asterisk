@@ -6,9 +6,26 @@ from sqlalchemy.orm import Session
 
 from models.ast_conf import AsteriskConf
 from schemas.queue import KNOWN_QUEUE_OPTION_FIELDS, QueueCreate, QueueResponse, QueueUpdate
+from services.ast_config_history import save_file_version
 
 QUEUES_CONF_FILENAME = "queues.conf"
 RESERVED_QUEUE_CATEGORIES = frozenset({"general"})
+
+
+def _snapshot_queues_before_change(
+    db_cdr: Session,
+    instance_id: int,
+    description: str,
+    author: str,
+) -> None:
+    save_file_version(
+        db_cdr,
+        instance_id,
+        QUEUES_CONF_FILENAME,
+        description,
+        author,
+        commit=False,
+    )
 
 
 def _queue_rows_filter(db_cdr: Session, instance_id: int, queue_name: str | None = None):
@@ -172,9 +189,22 @@ def queue_exists(db_cdr: Session, instance_id: int, queue_name: str) -> bool:
     )
 
 
-def create_queue(db_cdr: Session, instance_id: int, data: QueueCreate) -> QueueResponse:
+def create_queue(
+    db_cdr: Session,
+    instance_id: int,
+    data: QueueCreate,
+    *,
+    author: str = "api",
+) -> QueueResponse:
     if queue_exists(db_cdr, instance_id, data.name):
         raise ValueError(f"Queue '{data.name}' already exists")
+
+    _snapshot_queues_before_change(
+        db_cdr,
+        instance_id,
+        f"before create queue '{data.name}'",
+        author,
+    )
 
     option_pairs = _queue_option_pairs(
         strategy=data.strategy,
@@ -199,11 +229,23 @@ def create_queue(db_cdr: Session, instance_id: int, data: QueueCreate) -> QueueR
 
 
 def update_queue(
-    db_cdr: Session, instance_id: int, queue_name: str, data: QueueUpdate
+    db_cdr: Session,
+    instance_id: int,
+    queue_name: str,
+    data: QueueUpdate,
+    *,
+    author: str = "api",
 ) -> QueueResponse:
     existing_rows = _queue_rows_query(db_cdr, instance_id, queue_name).all()
     if not existing_rows:
         raise LookupError(f"Queue '{queue_name}' not found")
+
+    _snapshot_queues_before_change(
+        db_cdr,
+        instance_id,
+        f"before update queue '{queue_name}'",
+        author,
+    )
 
     current = _rows_to_queue_response(queue_name, existing_rows)
     cat_metric = existing_rows[0].cat_metric
@@ -244,11 +286,25 @@ def update_queue(
     return _rows_to_queue_response(queue_name, rows)
 
 
-def delete_queue(db_cdr: Session, instance_id: int, queue_name: str) -> bool:
-    deleted = _queue_rows_filter(db_cdr, instance_id, queue_name).delete(
+def delete_queue(
+    db_cdr: Session,
+    instance_id: int,
+    queue_name: str,
+    *,
+    author: str = "api",
+) -> bool:
+    if not queue_exists(db_cdr, instance_id, queue_name):
+        return False
+
+    _snapshot_queues_before_change(
+        db_cdr,
+        instance_id,
+        f"before delete queue '{queue_name}'",
+        author,
+    )
+
+    _queue_rows_filter(db_cdr, instance_id, queue_name).delete(
         synchronize_session=False
     )
-    if not deleted:
-        return False
     db_cdr.commit()
     return True

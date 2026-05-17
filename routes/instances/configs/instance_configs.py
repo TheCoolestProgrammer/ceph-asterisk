@@ -242,7 +242,16 @@ async def update_config(
     filename = _config_filename(config_update.config_type)
 
     if _is_db_config(filename):
+        author = config_update.change_author or "api"
         try:
+            save_file_version(
+                db_cdr,
+                instance_id,
+                filename,
+                f"before update via PUT /config ({config_update.config_type})",
+                author,
+                commit=False,
+            )
             replace_config_from_ini(
                 db_cdr, instance_id, filename, config_update.content
             )

@@ -13,6 +13,7 @@ from models.ast_conf import AsteriskConf
 STATIC_REALTIME_CONF_FILES: tuple[str, ...] = (
     # "pjsip.conf",  # на диске; endpoints/auth/aor — dynamic realtime (ps_*)
     "extensions.conf",
+    "voicemail.conf",
     "queues.conf",
     "stasis.conf",
     "cdr.conf",
@@ -95,6 +96,11 @@ def seed_config_from_ini(
 def _format_config_line(row: AsteriskConf) -> str:
     if row.filename == "extensions.conf" and row.var_name == "exten":
         return f"exten => {row.var_val}"
+    if (
+        row.filename == "voicemail.conf"
+        and row.category not in ("general", "zonemessages")
+    ):
+        return f"{row.var_name} => {row.var_val}"
     use_arrow = (
         row.filename == "asterisk.conf"
         and row.category == "directories"

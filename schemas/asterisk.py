@@ -117,6 +117,7 @@ class AsteriskInstanceResponse(BaseModel):
 class ConfigUpdate(BaseModel):
     config_type: str  # sip, extensions, etc.
     content: str
+    change_author: Optional[str] = "api"
 
 
 class ConfigHistoryEntry(BaseModel):

@@ -67,6 +67,7 @@ def seed_default_pjsip_users(
                 context=str(user["context"]),
                 transport=transport,
                 callerid=_format_callerid(str(user["callerid"]), username),
+                mailboxes=f"{username}@default",
             )
         )
         created.append(username)

@@ -34,6 +34,7 @@ class QueueCreate(BaseModel):
     maxlen: Optional[int] = Field(default=None, ge=0)
     members: list[str] = Field(default_factory=list)
     options: dict[str, str] = Field(default_factory=dict)
+    change_author: Optional[str] = "api"
 
     @field_validator("name")
     @classmethod
@@ -55,6 +56,7 @@ class QueueUpdate(BaseModel):
     maxlen: Optional[int] = Field(default=None, ge=0)
     members: Optional[list[str]] = None
     options: Optional[dict[str, str]] = None
+    change_author: Optional[str] = "api"
 
     @field_validator("members")
     @classmethod
