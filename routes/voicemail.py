@@ -4,7 +4,9 @@ from sqlalchemy.orm import Session
 from database import get_cdr_db, get_db
 from models.asterisk_instance import AsteriskInstance
 from schemas.voicemail import DEFAULT_VM_CONTEXT, VoicemailCreate, VoicemailResponse, VoicemailUpdate
+from schemas.audio_file import AudioFileSchema
 from services import voicemail_config
+from services.voicemail_messages import list_voicemail_recordings
 
 router = APIRouter(prefix="/instances/{instance_id}/voicemail")
 
@@ -16,6 +18,22 @@ def _get_instance_or_404(db: Session, instance_id: int) -> AsteriskInstance:
     if not instance:
         raise HTTPException(status_code=404, detail="Instance not found")
     return instance
+
+
+@router.get("/recordings", response_model=list[AudioFileSchema])
+async def list_voicemail_recordings_route(
+    instance_id: int = Path(...),
+    mailbox: str | None = None,
+    db: Session = Depends(get_db),
+):
+    """Голосовые сообщения на диске (для фронта / раздела аудио)."""
+    instance = _get_instance_or_404(db, instance_id)
+    return [
+        AudioFileSchema(**row)
+        for row in list_voicemail_recordings(
+            instance, instance_id=instance_id, mailbox=mailbox
+        )
+    ]
 
 
 @router.get("/", response_model=list[VoicemailResponse])

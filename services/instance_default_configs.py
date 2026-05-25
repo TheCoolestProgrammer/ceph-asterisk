@@ -203,6 +203,7 @@ astkeydir => /var/lib/asterisk
 astdatadir => /var/lib/asterisk
 astagidir => /var/lib/asterisk/agi-bin
 astspooldir => /var/spool/asterisk
+astsoundsdir => /opt/asterisk-core-sounds
 astrundir => /var/run/asterisk
 astlogdir => /var/log/asterisk
 

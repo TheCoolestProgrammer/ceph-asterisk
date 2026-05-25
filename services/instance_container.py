@@ -11,8 +11,6 @@ from config import config
 from models.asterisk_instance import AsteriskInstance
 from services.asterisk_reload import container_name_for_instance
 from utils.instance_paths import docker_volume_config_dir
-from utils.asterisk_image import ensure_asterisk_image
-from utils.instance_volumes import build_asterisk_container_volumes
 
 logger = logging.getLogger(__name__)
 
@@ -141,37 +139,39 @@ def remove_asterisk_container(instance_name: str) -> None:
         pass
 
 
+def remove_filebeat_container(instance_name: str) -> None:
+    client = docker.from_env()
+    name = f"filebeat-{instance_name}"
+    try:
+        container = client.containers.get(name)
+        container.stop(timeout=15)
+        container.remove()
+    except docker.errors.NotFound:
+        pass
+
+
 def run_asterisk_container(
     instance: AsteriskInstance,
     db,
     *,
     force_rebuild_image: bool = False,
 ) -> None:
-    """Создаёт контейнер asterisk-{name} с volume конфигов с хоста."""
-    client = docker.from_env()
-    image = ensure_asterisk_image(client, force_rebuild=force_rebuild_image)
+    """Поднимает asterisk-{name} и filebeat-{name} через docker compose."""
+    from services.instance_compose import sync_instance_compose
 
     base_path = docker_volume_config_dir(instance)
-    port_bindings = {
-        f"{instance.sip_port}/udp": instance.sip_port,
-        f"{instance.sip_port}/tcp": instance.sip_port,
-        f"{instance.http_port}/tcp": instance.http_port,
-    }
-    for port in range(instance.rtp_port_start, instance.rtp_port_end + 1):
-        port_bindings[f"{port}/udp"] = port
-
-    client.containers.run(
-        image=image,
-        name=container_name_for_instance(instance.name),
-        detach=True,
-        privileged=True,
-        ports=port_bindings,
-        network="ceph-asterisk_default",
-        volumes=build_asterisk_container_volumes(base_path),
+    sync_instance_compose(
+        instance,
+        force_rebuild_image=force_rebuild_image,
     )
     instance.status = "running"
     db.commit()
-    logger.info("Container asterisk-%s started, config volume %s", instance.name, base_path)
+    logger.info(
+        "Stack asterisk-%s + filebeat-%s started, config volume %s",
+        instance.name,
+        instance.name,
+        base_path,
+    )
 
 
 def recreate_asterisk_container(
@@ -180,8 +180,10 @@ def recreate_asterisk_container(
     *,
     force_rebuild_image: bool = False,
 ) -> str:
-    """Останавливает и пересоздаёт контейнер с актуальным bind-mount конфигов."""
+    """Останавливает и пересоздаёт asterisk + filebeat с актуальным bind-mount конфигов."""
+    from services.instance_compose import stop_instance_stack
+
     expected = docker_volume_config_dir(instance)
-    remove_asterisk_container(instance.name)
+    stop_instance_stack(instance)
     run_asterisk_container(instance, db, force_rebuild_image=force_rebuild_image)
     return expected

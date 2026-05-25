@@ -57,8 +57,13 @@ async def reload_instance(
         dialplan_fixed = repair_internal_dialplan(db_cdr, instance_id)
         media_fixed = repair_queue_and_moh(db_cdr, instance_id)
         vm_dialplan_fixed = ensure_voicemail_dialplan(db_cdr, instance_id)
+        from utils.asterisk_sounds import ensure_astsoundsdir_on_disk
+
+        sounds_conf_fixed = ensure_astsoundsdir_on_disk(instance)
         reload_asterisk_config(instance.name)
         msg = "Configuration reloaded successfully (core + manager)"
+        if sounds_conf_fixed:
+            msg += "; astsoundsdir => /opt/asterisk-core-sounds in asterisk.conf"
         if dialplan_fixed:
             msg += "; internal dialplan repaired (Echo -> Dial)"
         if media_fixed:
@@ -165,15 +170,41 @@ async def recreate_container(
         raise HTTPException(status_code=404, detail="Instance not found")
 
     try:
+        from services.voicemail_config import list_voicemail_boxes
+        from services.voicemail_modules import ensure_voicemail_modules
+        from utils.instance_voicemail_spool import (
+            ensure_instance_voicemail_dir,
+            warn_if_empty_sounds_dir,
+        )
+        from utils.voicemail_dialplan import ensure_voicemail_dialplan
+        from services.voicemail_sounds import warn_if_sounds_mount_overrides_defaults
+        from utils.asterisk_sounds import ensure_astsoundsdir_on_disk
+
         sync_pjsip_views_for_instance(db, db_cdr, instance)
+        ensure_voicemail_modules(instance)
+        dialplan_fixed = ensure_voicemail_dialplan(db_cdr, instance_id)
+        boxes = [b.mailbox for b in list_voicemail_boxes(db_cdr, instance_id)]
+        ensure_instance_voicemail_dir(instance, boxes or None)
+        if ensure_astsoundsdir_on_disk(instance):
+            msg_extra = "astsoundsdir обновлён в asterisk.conf; "
+        else:
+            msg_extra = ""
         volume_path = recreate_asterisk_container(
             instance, db, force_rebuild_image=rebuild_image
         )
         reload_asterisk_config(instance.name)
         mount = verify_instance_config_mount(instance)
-        msg = "Container recreated"
+        msg = f"{msg_extra}Container recreated"
         if rebuild_image:
             msg += " (Asterisk image rebuilt with voicemail sounds)"
+        if dialplan_fixed:
+            msg += "; dialplan 777/*97/8097 обновлён"
+        for warn in (
+            warn_if_empty_sounds_dir(instance),
+            warn_if_sounds_mount_overrides_defaults(instance),
+        ):
+            if warn:
+                msg += f"; WARNING: {warn}"
         return {
             "message": msg,
             "config_volume_host_path": volume_path,

@@ -2,6 +2,8 @@
 
 import os
 
+from utils.instance_voicemail_spool import VOICEMAIL_SUBDIR, ASTERISK_VM_CONTAINER_PATH
+
 
 def build_asterisk_container_volumes(base_path: str) -> dict:
     """
@@ -26,7 +28,21 @@ def build_asterisk_container_volumes(base_path: str) -> dict:
             "mode": "ro",
         }
 
+    voicemail_path = os.path.join(base_path, VOICEMAIL_SUBDIR)
+    os.makedirs(voicemail_path, exist_ok=True)
+    volumes[voicemail_path] = {
+        "bind": ASTERISK_VM_CONTAINER_PATH,
+        "mode": "rw",
+    }
+
     return volumes
+
+
+def compose_voicemail_volume(instance_config_path: str) -> str:
+    """Проброс spool voicemail для docker-compose."""
+    voicemail_path = os.path.join(instance_config_path, VOICEMAIL_SUBDIR)
+    os.makedirs(voicemail_path, exist_ok=True)
+    return f"{voicemail_path}:{ASTERISK_VM_CONTAINER_PATH}:rw"
 
 
 def compose_sounds_volume(instance_config_path: str) -> str | None:

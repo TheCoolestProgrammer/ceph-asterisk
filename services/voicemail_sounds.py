@@ -52,7 +52,7 @@ def check_voicemail_prompts(instance_name: str) -> str | None:
     if "does not exist" in combined or "no such file" in combined:
         return (
             "В контейнере нет vm-intro — VoiceMail сразу завершается с ошибкой. "
-            "Пересоберите образ из docker/asterisk.Dockerfile "
-            "(asterisk-core-sounds-en) и пересоздайте контейнер инстанса."
+            "Пересоберите образ (docker/asterisk.Dockerfile), в asterisk.conf "
+            "должно быть astsoundsdir => /opt/asterisk-core-sounds, затем reload."
         )
     return None

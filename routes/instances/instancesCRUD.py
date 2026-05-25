@@ -32,7 +32,7 @@ from services.instance_default_configs import (
 )
 from services.instance_pjsip_seed import seed_default_pjsip_users
 from services.pjsip_schema import ensure_pjsip_schema
-from services.instance_compose import build_compose_config
+from services.filebeat_config import write_filebeat_config
 from services.instance_container import run_asterisk_container
 from services.instance_runtime import apply_instance_ports_runtime
 from utils.instance_paths import (
@@ -234,7 +234,7 @@ async def create_instance(
     os.makedirs(f"{config_dir}/drivers", exist_ok=True)
     os.chmod(f"{config_dir}/drivers", 0o777)
 
-    os.makedirs(f"{config_dir}/asterisk_logs")
+    os.makedirs(f"{config_dir}/asterisk_logs", exist_ok=True)
     os.chmod(f"{config_dir}/asterisk_logs", 0o777)
 
     db_instance = None
@@ -284,6 +284,13 @@ async def create_instance(
             )
             ensure_voicemail_dialplan(db_cdr, db_instance.id)
             write_pjsip_users_conf(db_instance, db_cdr)
+
+        from utils.instance_voicemail_spool import ensure_instance_voicemail_dir
+
+        boxes = []
+        if create_test_users:
+            boxes = ["101", "102"]
+        ensure_instance_voicemail_dir(db_instance, boxes or None)
 
         background_tasks.add_task(_start_asterisk_container_task, db_instance.id)
 
@@ -490,12 +497,14 @@ def delete_instance(
 
     try:
         # Stop and remove container
-        compose_path = f"./{config.COMPOSE_FOLDER}/"
+        from services.instance_compose import compose_cli, compose_workdir
+
+        compose_path = compose_workdir()
         filename = f"docker-compose-{instance.name}.yml"
         # Проверяем существование директории docker-compose перед удалением
         if os.path.exists(compose_path):
             result = subprocess.run(
-                ["docker", "compose", "-f", f"{filename}", "down", "-v"],
+                compose_cli(instance.name, "down", "-v"),
                 cwd=compose_path,
                 capture_output=True,
                 text=True,
@@ -588,46 +597,7 @@ def create_default_configs(
         #     subprocess.run(['sudo', 'chown', f'{0}:{0}', filepath])
     # os.chmod(config_dir, 0o777)
     print(f"Конфиги созданы в {config_dir}")
-    compose_path = f"/app/{config.COMPOSE_FOLDER}"
-
-    filebeat_config = {
-        "filebeat.inputs": [
-            {
-                "type": "log",
-                "enabled": True,
-                "paths": ["/var/log/asterisk/messages*"],
-                "fields": {"pbx_id": "${PBX_NAME}"},
-                "fields_under_root": True,
-            }
-        ],
-        "processors": [
-            {
-                "dissect": {
-                    "tokenizer": "[%{timestamp}] %{level}[%{pid}] %{file}: %{message}",
-                    "field": "message",
-                    "target_prefix": "asterisk",
-                    "ignore_failure": True,
-                }
-            },
-            {
-                "timestamp": {
-                    "field": "asterisk.timestamp",
-                    "layouts": ["2006-01-02 15:04:05"],
-                }
-            },
-        ],
-        "output.elasticsearch": {
-            "hosts": ["elasticsearch:9200"],
-            "index": "raw-asterisk-logs",
-        },
-        "setup.ilm.enabled": False,
-        "setup.data_stream.enabled": False,
-        "setup.template.name": "asterisk",
-        "setup.template.pattern": "asterisk-*",
-    }
-    filename = f"filebeat-{instance.name}.yml"
-    with open(f"{compose_path}/{filename}", "w") as f:
-        yaml.dump(filebeat_config, f)
+    write_filebeat_config(instance.name)
 
 
 def _start_asterisk_container_task(instance_id: int) -> None:
@@ -694,8 +664,8 @@ def start_asterisk_container_by_library(instance: AsteriskInstance, db: Session)
 
 
 def start_asterisk_container(instance: AsteriskInstance, db: Session):
-    """Запуск контейнера с volume {HOST_PROJECT_PATH}/asterisk_configs/{name}."""
-    from services.instance_container import remove_asterisk_container
+    """Запуск asterisk + filebeat с volume {HOST_PROJECT_PATH}/asterisk_configs/{name}."""
+    from services.instance_compose import stop_instance_stack
 
     config_dir = docker_volume_config_dir(instance)
     print(f"Проверка конфигов в {config_dir}:")
@@ -706,7 +676,7 @@ def start_asterisk_container(instance: AsteriskInstance, db: Session):
                 print(f"  {file} - {os.path.getsize(filepath)} bytes")
 
     try:
-        remove_asterisk_container(instance.name)
+        stop_instance_stack(instance)
         run_asterisk_container(instance, db)
         print(f"Контейнер {instance.name} запущен, volume {config_dir}:/etc/asterisk")
     except Exception as e:

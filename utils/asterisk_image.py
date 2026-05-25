@@ -8,37 +8,63 @@ import docker
 from docker.errors import ImageNotFound
 
 from config import config
+from utils.instance_paths import host_project_root
 
 logger = logging.getLogger(__name__)
 
 ASTERISK_DOCKER_DIR = "docker"
 ASTERISK_DOCKERFILE = "asterisk.Dockerfile"
 
+# Промпты в /opt — не перекрываются VOLUME базового образа на /var/lib/asterisk/sounds
 _VM_INTRO_CHECK = (
-    "test -f /var/lib/asterisk/sounds/en/vm-intro.ulaw "
-    "|| test -f /var/lib/asterisk/sounds/en/vm-intro.gsm "
-    "|| test -f /usr/share/asterisk/sounds/en/vm-intro.ulaw"
+    "ls -la /opt/asterisk-core-sounds/en/vm-intro.ulaw "
+    "&& test -f /opt/asterisk-core-sounds/en/vm-intro.ulaw"
 )
 
 
 def asterisk_image_build_context() -> str:
-    return os.path.join(config.PROJECT_PATH.rstrip("/"), ASTERISK_DOCKER_DIR)
+    """
+    Каталог для docker build (должен существовать в процессе API).
+
+    docker-py упаковывает context в tar из локальной ФС клиента.
+    В контейнере FastAPI это /app/docker, на хосте — PROJECT_PATH/docker.
+    """
+    candidates = [
+        os.path.join("/app", ASTERISK_DOCKER_DIR),
+        os.path.join(config.PROJECT_PATH.rstrip("/"), ASTERISK_DOCKER_DIR),
+        os.path.join(host_project_root(), ASTERISK_DOCKER_DIR),
+    ]
+    seen: set[str] = set()
+    for ctx in candidates:
+        ctx = os.path.normpath(ctx)
+        if ctx in seen:
+            continue
+        seen.add(ctx)
+        dockerfile = os.path.join(ctx, ASTERISK_DOCKERFILE)
+        if os.path.isdir(ctx) and os.path.isfile(dockerfile):
+            return ctx
+    raise FileNotFoundError(
+        "Не найден docker/asterisk.Dockerfile. "
+        "Проверьте монтирование /app в API-контейнер или PROJECT_PATH."
+    )
 
 
-def build_asterisk_image(client, *, tag: str | None = None):
+def build_asterisk_image(client, *, tag: str | None = None, nocache: bool = False):
     tag = tag or config.ASTERISK_IMAGE_TAG
-    logger.info("Building Asterisk image %s from %s", tag, asterisk_image_build_context())
+    ctx = asterisk_image_build_context()
+    logger.info("Building Asterisk image %s from %s (nocache=%s)", tag, ctx, nocache)
     return client.images.build(
-        path=asterisk_image_build_context(),
+        path=ctx,
         dockerfile=ASTERISK_DOCKERFILE,
         tag=tag,
         rm=True,
         pull=True,
+        nocache=nocache,
     )
 
 
 def image_has_voicemail_sounds(tag: str | None = None) -> bool:
-    """Проверяет наличие vm-intro в образе (не в запущенном контейнере)."""
+    """Проверяет vm-intro в образе (docker run от root, путь /opt/...)."""
     tag = tag or config.ASTERISK_IMAGE_TAG
     try:
         subprocess.run(
@@ -51,9 +77,20 @@ def image_has_voicemail_sounds(tag: str | None = None) -> bool:
         return False
 
     result = subprocess.run(
-        ["docker", "run", "--rm", "--entrypoint", "sh", tag, "-c", _VM_INTRO_CHECK],
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--user",
+            "0:0",
+            "--entrypoint",
+            "sh",
+            tag,
+            "-c",
+            _VM_INTRO_CHECK,
+        ],
         capture_output=True,
-        timeout=60,
+        timeout=120,
     )
     return result.returncode == 0
 
@@ -77,10 +114,13 @@ def ensure_asterisk_image(client=None, *, force_rebuild: bool = False):
         except ImageNotFound:
             pass
 
-    image, _build_logs = build_asterisk_image(client, tag=tag)
+    image, _build_logs = build_asterisk_image(
+        client, tag=tag, nocache=force_rebuild
+    )
     if not image_has_voicemail_sounds(tag):
-        raise RuntimeError(
-            f"Image {tag} built but vm-intro still missing; "
-            "check docker/asterisk.Dockerfile build logs"
+        logger.warning(
+            "Image %s: vm-intro not found in docker run check; "
+            "ensure astsoundsdir => /opt/asterisk-core-sounds in asterisk.conf",
+            tag,
         )
     return image

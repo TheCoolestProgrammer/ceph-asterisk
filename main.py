@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import Base, engine, BaseCDR, engine_cdr
-from routes import cdr, users, auth, queues, voicemail
+from routes import cdr, users, auth, queues, voicemail, dialplan
 from routes.instances import instances, instancesCRUD
 from routes.instances.configs import instance_configs
 from routes import logs
@@ -39,6 +39,7 @@ app.include_router(instance_configs.router)
 app.include_router(auth.router)
 app.include_router(audio_files.router)
 app.include_router(logs.router)
+app.include_router(dialplan.router)
 
 @app.get("/health_check")
 def health_check():
