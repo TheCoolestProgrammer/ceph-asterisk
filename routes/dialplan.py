@@ -5,7 +5,12 @@ from sqlalchemy.orm import Session
 from database import get_db, get_cdr_db
 from models.asterisk_instance import AsteriskInstance
 from models.ast_conf import AsteriskConf
-from schemas.dialplan import DialplanResponse, DialplanUpdate
+from schemas.dialplan import (
+    DialplanContextUpdate,
+    DialplanResponse,
+    DialplanRowResponse,
+    DialplanUpdate,
+)
 from services.ast_config_history import save_file_version
 from services.asterisk_reload import AsteriskReloadError, reload_asterisk_config
 
@@ -47,7 +52,7 @@ async def get_dialplan(
     return DialplanResponse(
         instance_id=instance_id,
         filename=filename,
-        rows=rows,
+        rows=[DialplanRowResponse.model_validate(row) for row in rows],
     )
 
 
@@ -81,6 +86,129 @@ async def get_dialplan_contexts(
     )
 
     return [row[0] for row in rows]
+
+
+@router.get("/{context}", response_model=DialplanResponse)
+async def get_dialplan_context(
+    instance_id: int,
+    context: str,
+    filename: str = "extensions.conf",
+    db: Session = Depends(get_db),
+    db_cdr: Session = Depends(get_cdr_db),
+):
+    """
+    Получить диалплан только выбранного контекста.
+
+    Возвращает строки extensions.conf для одного category.
+    """
+    instance = (
+        db.query(AsteriskInstance).filter(AsteriskInstance.id == instance_id).first()
+    )
+    if not instance:
+        raise HTTPException(status_code=404, detail="Instance not found")
+
+    rows = (
+        db_cdr.query(AsteriskConf)
+        .filter(
+            AsteriskConf.instance_id == instance_id,
+            AsteriskConf.filename == filename,
+            AsteriskConf.category == context,
+        )
+        .order_by(AsteriskConf.cat_metric, AsteriskConf.var_metric)
+        .all()
+    )
+
+    if not rows:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Dialplan context '{context}' not found for filename '{filename}'",
+        )
+
+    return DialplanResponse(
+        instance_id=instance_id,
+        filename=filename,
+        rows=[DialplanRowResponse.model_validate(row) for row in rows],
+    )
+
+
+@router.put("/{context}", response_model=dict)
+async def update_dialplan_context(
+    instance_id: int,
+    context: str,
+    dialplan_update: DialplanContextUpdate,
+    db: Session = Depends(get_db),
+    db_cdr: Session = Depends(get_cdr_db),
+):
+    """
+    Обновить диалплан только для одного контекста.
+
+    Сохраняет старое состояние, удаляет строки выбранного context и добавляет новые.
+    """
+    instance = (
+        db.query(AsteriskInstance).filter(AsteriskInstance.id == instance_id).first()
+    )
+    if not instance:
+        raise HTTPException(status_code=404, detail="Instance not found")
+
+    filename = dialplan_update.filename
+    author = dialplan_update.change_author or "api"
+    description = (
+        dialplan_update.description or f"Updated context {context} via visual editor"
+    )
+
+    try:
+        history_entry = save_file_version(
+            db_cdr,
+            instance_id,
+            filename,
+            description,
+            author,
+            commit=False,
+        )
+
+        db_cdr.query(AsteriskConf).filter(
+            AsteriskConf.instance_id == instance_id,
+            AsteriskConf.filename == filename,
+            AsteriskConf.category == context,
+        ).delete(synchronize_session=False)
+
+        for row_data in dialplan_update.rows:
+            conf_row = AsteriskConf(
+                instance_id=instance_id,
+                filename=filename,
+                cat_metric=row_data.cat_metric,
+                var_metric=row_data.var_metric,
+                category=context,
+                var_name=row_data.var_name,
+                var_val=row_data.var_val,
+                commented=row_data.commented,
+            )
+            db_cdr.add(conf_row)
+
+        db_cdr.commit()
+
+        reload_message = ""
+        if dialplan_update.reload_asterisk:
+            try:
+                reload_asterisk_config(str(instance.name))
+                reload_message = "; Asterisk reloaded"
+            except AsteriskReloadError as e:
+                reload_message = f"; Asterisk reload failed: {e.message}"
+
+        return {
+            "message": f"Dialplan context '{context}' updated successfully{reload_message}",
+            "filename": filename,
+            "context": context,
+            "rows_added": len(dialplan_update.rows),
+            "history_version": history_entry.version,
+            "history_id": history_entry.id,
+        }
+
+    except Exception as e:
+        db_cdr.rollback()
+        raise HTTPException(
+            status_code=500, detail=f"Failed to update dialplan context: {str(e)}"
+        )
 
 
 @router.put("", response_model=dict)
