@@ -16,7 +16,11 @@ from schemas.voicemail import (
 )
 from schemas.audio_file import AudioFileSchema
 from services import voicemail_config
-from services.voicemail_messages import list_voicemail_recordings, resolve_voicemail_audio_path
+from services.voicemail_messages import (
+    list_voicemail_recordings,
+    resolve_voicemail_audio_path,
+    resolve_voicemail_message_file,
+)
 
 router = APIRouter(prefix="/instances/{instance_id}/voicemail")
 
@@ -73,25 +77,35 @@ async def get_voicemail_recording_file_route(
 ):
     """Отдаёт конкретный аудиофайл voicemail по ящику."""
     instance = _get_instance_or_404(db, instance_id)
-    rel_path = f"{context}/{mailbox}/{folder}/{filename}"
     try:
-        audio_path = resolve_voicemail_audio_path(instance, rel_path)
+        audio_path = resolve_voicemail_message_file(
+            instance,
+            context=context,
+            mailbox=mailbox,
+            folder=folder,
+            filename=filename,
+        )
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Запись не найдена") from None
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
-    media = "audio/wav"
     suffix = audio_path.suffix.lower()
-    if suffix == ".gsm":
-        media = "audio/gsm"
-    elif suffix in (".ulaw", ".alaw"):
-        media = "audio/basic"
+    media_by_suffix = {
+        ".wav": "audio/wav",
+        ".gsm": "audio/gsm",
+        ".ulaw": "audio/basic",
+        ".alaw": "audio/basic",
+        ".sln": "audio/basic",
+        ".sln16": "audio/basic",
+    }
+    media = media_by_suffix.get(suffix, "application/octet-stream")
 
     return FileResponse(
         path=str(audio_path),
         media_type=media,
         filename=audio_path.name,
+        headers={"Accept-Ranges": "bytes"},
     )
 
 

@@ -12,7 +12,21 @@ from models.asterisk_instance import AsteriskInstance
 from utils.instance_voicemail_spool import instance_voicemail_host_dir
 
 AUDIO_EXTENSIONS = {".wav", ".WAV", ".gsm", ".GSM", ".ulaw", ".alaw", ".sln", ".sln16"}
+# Один voicemail-message может иметь несколько файлов (wav+gsm); отдаём один формат.
+PREFERRED_AUDIO_EXTENSIONS = (".wav", ".gsm", ".ulaw", ".alaw", ".sln", ".sln16")
 VM_FOLDERS = ("INBOX", "Old", "Urgent", "Work", "Family", "Friends")
+
+
+def _audio_format_rank(suffix: str) -> int:
+    normalized = suffix.lower()
+    for index, ext in enumerate(PREFERRED_AUDIO_EXTENSIONS):
+        if normalized == ext:
+            return index
+    return len(PREFERRED_AUDIO_EXTENSIONS)
+
+
+def _pick_preferred_audio_file(candidates: list[Path]) -> Path:
+    return min(candidates, key=lambda path: _audio_format_rank(path.suffix))
 
 
 def _parse_vm_txt(txt_path: Path) -> dict[str, str]:
@@ -89,11 +103,18 @@ def list_voicemail_recordings(
             folder_dir = box_dir / folder
             if not folder_dir.is_dir():
                 continue
+            by_message: dict[str, list[Path]] = {}
             for audio_path in folder_dir.iterdir():
                 if not audio_path.is_file():
                     continue
                 if audio_path.suffix not in AUDIO_EXTENSIONS:
                     continue
+                message_key = audio_path.stem.lower()
+                by_message.setdefault(message_key, []).append(audio_path)
+
+            for audio_path in (
+                _pick_preferred_audio_file(paths) for paths in by_message.values()
+            ):
                 rel = audio_path.relative_to(root).as_posix()
                 txt_path = audio_path.with_suffix(".txt")
                 meta = _parse_vm_txt(txt_path)
@@ -127,6 +148,38 @@ def list_voicemail_recordings(
 
     items.sort(key=lambda x: (x["create_date"], x["name"]), reverse=True)
     return items
+
+
+def resolve_voicemail_message_file(
+    instance: AsteriskInstance,
+    *,
+    context: str,
+    mailbox: str,
+    folder: str,
+    filename: str,
+) -> Path:
+    """
+    Ищет аудиофайл сообщения в папке ящика.
+    filename может быть msg0000.wav — подберётся существующий формат (wav/gsm).
+    """
+    root = Path(instance_voicemail_host_dir(instance)).resolve()
+    folder_dir = root / context / mailbox / folder
+    if not folder_dir.is_dir():
+        raise FileNotFoundError(f"{context}/{mailbox}/{folder}")
+
+    requested = Path(filename)
+    stem = requested.stem.lower()
+    candidates = [
+        path
+        for path in folder_dir.iterdir()
+        if path.is_file()
+        and path.suffix in AUDIO_EXTENSIONS
+        and path.stem.lower() == stem
+    ]
+    if not candidates:
+        raise FileNotFoundError(filename)
+
+    return _pick_preferred_audio_file(candidates)
 
 
 def resolve_voicemail_audio_path(
