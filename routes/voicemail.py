@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from database import get_cdr_db, get_db
@@ -15,7 +16,7 @@ from schemas.voicemail import (
 )
 from schemas.audio_file import AudioFileSchema
 from services import voicemail_config
-from services.voicemail_messages import list_voicemail_recordings
+from services.voicemail_messages import list_voicemail_recordings, resolve_voicemail_audio_path
 
 router = APIRouter(prefix="/instances/{instance_id}/voicemail")
 
@@ -43,6 +44,55 @@ async def list_voicemail_recordings_route(
             instance, instance_id=instance_id, mailbox=mailbox
         )
     ]
+
+
+@router.get("/{mailbox}/recordings", response_model=list[AudioFileSchema])
+async def list_voicemail_recordings_by_mailbox_route(
+    mailbox: str = Path(...),
+    instance_id: int = Path(...),
+    db: Session = Depends(get_db),
+):
+    """Голосовые сообщения конкретного ящика."""
+    instance = _get_instance_or_404(db, instance_id)
+    return [
+        AudioFileSchema(**row)
+        for row in list_voicemail_recordings(
+            instance, instance_id=instance_id, mailbox=mailbox
+        )
+    ]
+
+
+@router.get("/{mailbox}/recordings/file/{filename}")
+async def get_voicemail_recording_file_route(
+    mailbox: str = Path(...),
+    filename: str = Path(..., description="Имя файла, например msg0000.wav"),
+    instance_id: int = Path(...),
+    folder: str = "INBOX",
+    context: str = DEFAULT_VM_CONTEXT,
+    db: Session = Depends(get_db),
+):
+    """Отдаёт конкретный аудиофайл voicemail по ящику."""
+    instance = _get_instance_or_404(db, instance_id)
+    rel_path = f"{context}/{mailbox}/{folder}/{filename}"
+    try:
+        audio_path = resolve_voicemail_audio_path(instance, rel_path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Запись не найдена") from None
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    media = "audio/wav"
+    suffix = audio_path.suffix.lower()
+    if suffix == ".gsm":
+        media = "audio/gsm"
+    elif suffix in (".ulaw", ".alaw"):
+        media = "audio/basic"
+
+    return FileResponse(
+        path=str(audio_path),
+        media_type=media,
+        filename=audio_path.name,
+    )
 
 
 @router.get("/", response_model=list[VoicemailResponse])

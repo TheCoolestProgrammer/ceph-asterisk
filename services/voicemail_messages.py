@@ -20,15 +20,18 @@ def _parse_vm_txt(txt_path: Path) -> dict[str, str]:
     if not txt_path.is_file():
         return meta
     parser = configparser.ConfigParser()
+    text = ""
     try:
-        parser.read(txt_path, encoding="utf-8", errors="replace")
+        text = txt_path.read_text(encoding="utf-8", errors="replace")
+        parser.read_string(text)
         if parser.has_section("message"):
             meta = {k: v for k, v in parser.items("message")}
-    except configparser.Error:
+    except (OSError, configparser.Error):
         pass
     if not meta:
         try:
-            text = txt_path.read_text(encoding="utf-8", errors="replace")
+            if not text:
+                text = txt_path.read_text(encoding="utf-8", errors="replace")
             for key in ("callerid", "origdate", "duration", "origtime"):
                 match = re.search(rf"^{key}=(.+)$", text, re.MULTILINE | re.IGNORECASE)
                 if match:
