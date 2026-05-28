@@ -16,9 +16,11 @@ ASTERISK_DOCKER_DIR = "docker"
 ASTERISK_DOCKERFILE = "asterisk.Dockerfile"
 
 # Промпты в /opt — не перекрываются VOLUME базового образа на /var/lib/asterisk/sounds
-_VM_INTRO_CHECK = (
+_VM_SOUNDS_CHECK = (
     "ls -la /opt/asterisk-core-sounds/en/vm-intro.ulaw "
-    "&& test -f /opt/asterisk-core-sounds/en/vm-intro.ulaw"
+    "/opt/asterisk-core-sounds/en/vm-password.ulaw "
+    "&& test -f /opt/asterisk-core-sounds/en/vm-intro.ulaw "
+    "&& test -f /opt/asterisk-core-sounds/en/vm-password.ulaw"
 )
 
 
@@ -64,7 +66,7 @@ def build_asterisk_image(client, *, tag: str | None = None, nocache: bool = Fals
 
 
 def image_has_voicemail_sounds(tag: str | None = None) -> bool:
-    """Проверяет vm-intro в образе (docker run от root, путь /opt/...)."""
+    """Проверяет vm-intro и vm-password в образе (путь /opt/...)."""
     tag = tag or config.ASTERISK_IMAGE_TAG
     try:
         subprocess.run(
@@ -87,7 +89,7 @@ def image_has_voicemail_sounds(tag: str | None = None) -> bool:
             "sh",
             tag,
             "-c",
-            _VM_INTRO_CHECK,
+            _VM_SOUNDS_CHECK,
         ],
         capture_output=True,
         timeout=120,
@@ -98,7 +100,7 @@ def image_has_voicemail_sounds(tag: str | None = None) -> bool:
 def ensure_asterisk_image(client=None, *, force_rebuild: bool = False):
     """
     Возвращает образ Asterisk с промптами voicemail.
-    Пересобирает, если образа нет, force_rebuild или нет vm-intro.
+    Пересобирает, если образа нет, force_rebuild или не хватает vm-*.
     """
     client = client or docker.from_env()
     tag = config.ASTERISK_IMAGE_TAG
@@ -109,7 +111,7 @@ def ensure_asterisk_image(client=None, *, force_rebuild: bool = False):
             if image_has_voicemail_sounds(tag):
                 return image
             logger.warning(
-                "Image %s exists but vm-intro missing; rebuilding", tag
+                "Image %s exists but required vm-* prompts missing; rebuilding", tag
             )
         except ImageNotFound:
             pass
@@ -119,7 +121,7 @@ def ensure_asterisk_image(client=None, *, force_rebuild: bool = False):
     )
     if not image_has_voicemail_sounds(tag):
         logger.warning(
-            "Image %s: vm-intro not found in docker run check; "
+            "Image %s: required vm-* prompts not found in docker run check; "
             "ensure astsoundsdir => /opt/asterisk-core-sounds in asterisk.conf",
             tag,
         )

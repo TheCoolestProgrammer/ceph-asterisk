@@ -137,6 +137,67 @@ def _link_endpoint_mwi(
     return True
 
 
+def _get_endpoint_for_instance(
+    cdr_db: Session, instance_name: str, user_id: str
+) -> PjsipEndpoint | None:
+    return (
+        cdr_db.query(PjsipEndpoint)
+        .options(joinedload(PjsipEndpoint.aors_fk))
+        .join(PjsipAor, PjsipEndpoint.aors_id == PjsipAor.pk)
+        .filter(PjsipAor.reg_server == instance_name)
+        .filter(PjsipEndpoint.id == user_id)
+        .first()
+    )
+
+
+def _parse_endpoint_mailbox_ref(mailboxes: str | None) -> tuple[str, str] | None:
+    if not mailboxes:
+        return None
+    first_ref = mailboxes.split(",", 1)[0].strip()
+    if not first_ref:
+        return None
+    if "@" in first_ref:
+        mailbox, context = first_ref.split("@", 1)
+        mailbox = mailbox.strip()
+        context = context.strip() or DEFAULT_VM_CONTEXT
+    else:
+        mailbox = first_ref
+        context = DEFAULT_VM_CONTEXT
+    if not mailbox:
+        return None
+    return mailbox, context
+
+
+def _parse_mailbox_refs(mailboxes: str | None) -> list[tuple[str, str]]:
+    if not mailboxes:
+        return []
+    refs: list[tuple[str, str]] = []
+    for raw_ref in mailboxes.split(","):
+        ref = raw_ref.strip()
+        if not ref:
+            continue
+        if "@" in ref:
+            mailbox, context = ref.split("@", 1)
+            mailbox = mailbox.strip()
+            context = context.strip() or DEFAULT_VM_CONTEXT
+        else:
+            mailbox = ref
+            context = DEFAULT_VM_CONTEXT
+        if mailbox:
+            refs.append((mailbox, context))
+    return refs
+
+
+def _format_mailbox_refs(refs: list[tuple[str, str]]) -> str | None:
+    if not refs:
+        return None
+    formatted = [
+        f"{mailbox}@{context}" if context else f"{mailbox}@{DEFAULT_VM_CONTEXT}"
+        for mailbox, context in refs
+    ]
+    return ",".join(formatted)
+
+
 def list_voicemail_boxes(db_cdr: Session, instance_id: int) -> list[VoicemailResponse]:
     rows = (
         _mailbox_rows_filter(db_cdr, instance_id)
@@ -166,6 +227,99 @@ def mailbox_exists(
     db_cdr: Session, instance_id: int, mailbox: str, context: str = DEFAULT_VM_CONTEXT
 ) -> bool:
     return get_voicemail_box(db_cdr, instance_id, mailbox, context) is not None
+
+
+def get_voicemail_box_by_user_id(
+    db_cdr: Session, instance_id: int, instance_name: str, user_id: str
+) -> VoicemailResponse | None:
+    endpoint = _get_endpoint_for_instance(db_cdr, instance_name, user_id)
+    if endpoint is None:
+        return None
+
+    mailbox_ref = _parse_endpoint_mailbox_ref(endpoint.mailboxes)
+    if mailbox_ref is not None:
+        mailbox, context = mailbox_ref
+        box = get_voicemail_box(db_cdr, instance_id, mailbox, context)
+        if box is not None:
+            return box
+
+    return None
+
+
+def bind_user_to_voicemail_box(
+    db_cdr: Session,
+    instance_id: int,
+    instance_name: str,
+    *,
+    user_id: str,
+    mailbox: str,
+    context: str = DEFAULT_VM_CONTEXT,
+) -> tuple[str, str, str]:
+    endpoint = _get_endpoint_for_instance(db_cdr, instance_name, user_id)
+    if endpoint is None:
+        raise LookupError(f"User '{user_id}' not found in instance '{instance_name}'")
+
+    box = get_voicemail_box(db_cdr, instance_id, mailbox, context)
+    if box is None:
+        raise LookupError(f"Voicemail box '{mailbox}@{context}' not found")
+
+    endpoint.mailboxes = f"{mailbox}@{context}"
+    db_cdr.commit()
+    return user_id, mailbox, context
+
+
+def unbind_user_from_voicemail_box(
+    db_cdr: Session,
+    instance_name: str,
+    *,
+    user_id: str,
+    mailbox: str | None = None,
+    context: str = DEFAULT_VM_CONTEXT,
+) -> tuple[str, str | None, str]:
+    endpoint = _get_endpoint_for_instance(db_cdr, instance_name, user_id)
+    if endpoint is None:
+        raise LookupError(f"User '{user_id}' not found in instance '{instance_name}'")
+
+    refs = _parse_mailbox_refs(endpoint.mailboxes)
+    if mailbox is None:
+        endpoint.mailboxes = None
+        db_cdr.commit()
+        return user_id, None, context
+
+    filtered = [
+        (ref_mailbox, ref_context)
+        for ref_mailbox, ref_context in refs
+        if not (ref_mailbox == mailbox and ref_context == context)
+    ]
+    endpoint.mailboxes = _format_mailbox_refs(filtered)
+    db_cdr.commit()
+    return user_id, mailbox, context
+
+
+def unbind_mailbox_from_all_users(
+    db_cdr: Session, instance_name: str, mailbox: str, context: str
+) -> int:
+    endpoints = (
+        db_cdr.query(PjsipEndpoint)
+        .join(PjsipAor, PjsipEndpoint.aors_id == PjsipAor.pk)
+        .filter(PjsipAor.reg_server == instance_name)
+        .all()
+    )
+    unlinked_count = 0
+    for endpoint in endpoints:
+        refs = _parse_mailbox_refs(endpoint.mailboxes)
+        if not refs:
+            continue
+        filtered = [
+            (ref_mailbox, ref_context)
+            for ref_mailbox, ref_context in refs
+            if not (ref_mailbox == mailbox and ref_context == context)
+        ]
+        if len(filtered) == len(refs):
+            continue
+        endpoint.mailboxes = _format_mailbox_refs(filtered)
+        unlinked_count += 1
+    return unlinked_count
 
 
 def create_voicemail_box(
@@ -280,13 +434,7 @@ def delete_voicemail_box(
     if not deleted:
         return False
     if clear_endpoint_mwi:
-        _link_endpoint_mwi(
-            cdr_db=db_cdr,
-            instance_name=instance_name,
-            mailbox=mailbox,
-            context=context,
-            enable=False,
-        )
+        unbind_mailbox_from_all_users(db_cdr, instance_name, mailbox, context)
     db_cdr.commit()
     return True
 

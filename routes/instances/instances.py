@@ -16,6 +16,7 @@ from services.asterisk_reload import (
     run_asterisk_cli,
 )
 from services.pjsip_schema import ensure_pjsip_schema
+from services.voicemail_modules import ensure_voicemail_modules
 from utils.dialplan_repair import repair_internal_dialplan, repair_queue_and_moh
 from utils.voicemail_dialplan import ensure_voicemail_dialplan
 from services.voicemail_sounds import (
@@ -52,6 +53,7 @@ async def reload_instance(
         raise HTTPException(status_code=404, detail="Instance not found")
 
     try:
+        ensure_voicemail_modules(instance)
         schema_added = ensure_pjsip_schema(db_cdr)
         sync_pjsip_views_for_instance(db, db_cdr, instance)
         dialplan_fixed = repair_internal_dialplan(db_cdr, instance_id)

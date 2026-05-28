@@ -3,7 +3,16 @@ from sqlalchemy.orm import Session
 
 from database import get_cdr_db, get_db
 from models.asterisk_instance import AsteriskInstance
-from schemas.voicemail import DEFAULT_VM_CONTEXT, VoicemailCreate, VoicemailResponse, VoicemailUpdate
+from schemas.voicemail import (
+    DEFAULT_VM_CONTEXT,
+    VoicemailCreate,
+    VoicemailResponse,
+    VoicemailUpdate,
+    VoicemailUserBindingRequest,
+    VoicemailUserBindingResponse,
+    VoicemailUserUnbindRequest,
+    VoicemailUserUnbindResponse,
+)
 from schemas.audio_file import AudioFileSchema
 from services import voicemail_config
 from services.voicemail_messages import list_voicemail_recordings
@@ -46,6 +55,24 @@ async def list_voicemail_boxes(
     return voicemail_config.list_voicemail_boxes(cdr_db, instance_id)
 
 
+@router.get("/by-user/{user_id}", response_model=VoicemailResponse)
+async def get_voicemail_box_by_user_id(
+    user_id: str = Path(...),
+    instance_id: int = Path(...),
+    db: Session = Depends(get_db),
+    cdr_db: Session = Depends(get_cdr_db),
+):
+    instance = _get_instance_or_404(db, instance_id)
+    box = voicemail_config.get_voicemail_box_by_user_id(
+        cdr_db, instance_id, instance.name, user_id
+    )
+    if not box:
+        raise HTTPException(
+            status_code=404, detail=f"Voicemail box for user '{user_id}' not found"
+        )
+    return box
+
+
 @router.get("/{mailbox}", response_model=VoicemailResponse)
 async def get_voicemail_box(
     mailbox: str = Path(...),
@@ -61,6 +88,65 @@ async def get_voicemail_box(
             status_code=404, detail=f"Voicemail box '{mailbox}@{context}' not found"
         )
     return box
+
+
+@router.post("/bind-user", response_model=VoicemailUserBindingResponse)
+async def bind_user_to_voicemail_box(
+    data: VoicemailUserBindingRequest,
+    instance_id: int = Path(...),
+    db: Session = Depends(get_db),
+    cdr_db: Session = Depends(get_cdr_db),
+):
+    instance = _get_instance_or_404(db, instance_id)
+    try:
+        user_id, mailbox, context = voicemail_config.bind_user_to_voicemail_box(
+            cdr_db,
+            instance_id,
+            instance.name,
+            user_id=data.user_id,
+            mailbox=data.mailbox,
+            context=data.context,
+        )
+        return VoicemailUserBindingResponse(
+            user_id=user_id,
+            mailbox=mailbox,
+            context=context,
+            linked=True,
+        )
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except Exception as e:
+        cdr_db.rollback()
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/unbind-user", response_model=VoicemailUserUnbindResponse)
+async def unbind_user_from_voicemail_box(
+    data: VoicemailUserUnbindRequest,
+    instance_id: int = Path(...),
+    db: Session = Depends(get_db),
+    cdr_db: Session = Depends(get_cdr_db),
+):
+    instance = _get_instance_or_404(db, instance_id)
+    try:
+        user_id, mailbox, context = voicemail_config.unbind_user_from_voicemail_box(
+            cdr_db,
+            instance.name,
+            user_id=data.user_id,
+            mailbox=data.mailbox,
+            context=data.context,
+        )
+        return VoicemailUserUnbindResponse(
+            user_id=user_id,
+            mailbox=mailbox,
+            context=context,
+            unlinked=True,
+        )
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except Exception as e:
+        cdr_db.rollback()
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/", response_model=VoicemailResponse, status_code=status.HTTP_201_CREATED)

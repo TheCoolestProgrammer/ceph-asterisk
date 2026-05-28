@@ -15,6 +15,8 @@ VM_CONTEXTS = ("from-internal", "from-external")
 FULL_777_REQUIRED_FRAGMENTS = (
     "777,n,Answer()",
     "777,n,Dial(PJSIP/101",
+    '777,n,GotoIf($["${DIALSTATUS}"="ANSWER"]?',
+    "777,n,NoOp(777 VM DIALSTATUS=${DIALSTATUS})",
     "777,n,VoiceMail(101@default)",
 )
 
@@ -45,7 +47,11 @@ def _vm_access_lines(exten: str) -> list[str]:
         f"{exten},1,NoOp(Голосовая почта ${{CALLERID(num)}})",
         f"{exten},n,Answer()",
         f"{exten},n,Wait(1)",
-        f"{exten},n,VoiceMailMain(${{CALLERID(num)}}@default)",
+        f"{exten},n,Set(VMBOX=${{CALLERID(num)}})",
+        f'{exten},n,GotoIf($[${{REGEX("^[0-9]+$" ${{VMBOX}})}}]?vm_login:vm_prompt)',
+        f"{exten},n(vm_prompt),VoiceMailMain(@default)",
+        f"{exten},n,Hangup()",
+        f"{exten},n(vm_login),VoiceMailMain(${{VMBOX}}@default)",
         f"{exten},n,Hangup()",
     ]
 
@@ -191,7 +197,28 @@ def _insert_exten_rows(
         )
 
 
-def _777_is_complete(db_cdr: Session, instance_id: int, category: str) -> bool:
+def _777_has_exact_lines(
+    db_cdr: Session, instance_id: int, category: str, lines: list[str]
+) -> bool:
+    for line in lines:
+        if not (
+            db_cdr.query(AsteriskConf)
+            .filter(
+                AsteriskConf.instance_id == instance_id,
+                AsteriskConf.filename == EXTENSIONS_FILENAME,
+                AsteriskConf.category == category,
+                AsteriskConf.var_name == "exten",
+                AsteriskConf.var_val == line,
+            )
+            .first()
+        ):
+            return False
+    return True
+
+
+def _777_is_complete(
+    db_cdr: Session, instance_id: int, category: str, expected_lines: list[str]
+) -> bool:
     if not _has_exten_pattern(db_cdr, instance_id, category, "777"):
         return False
     for fragment in FULL_777_REQUIRED_FRAGMENTS:
@@ -222,13 +249,15 @@ def _777_is_complete(db_cdr: Session, instance_id: int, category: str) -> bool:
         )
         .first()
     )
-    return old_style is None
+    if old_style is not None:
+        return False
+    return _777_has_exact_lines(db_cdr, instance_id, category, expected_lines)
 
 
 def _ensure_777_in_context(
     db_cdr: Session, instance_id: int, category: str, lines: list[str]
 ) -> bool:
-    if _777_is_complete(db_cdr, instance_id, category):
+    if _777_is_complete(db_cdr, instance_id, category, lines):
         return False
 
     cat_metric = _context_cat_metric(db_cdr, instance_id, category)
@@ -241,21 +270,22 @@ def _ensure_777_in_context(
 
 
 def _vm_access_is_complete(
-    db_cdr: Session, instance_id: int, category: str, exten: str
+    db_cdr: Session, instance_id: int, category: str, lines: list[str]
 ) -> bool:
-    return (
-        db_cdr.query(AsteriskConf)
-        .filter(
-            AsteriskConf.instance_id == instance_id,
-            AsteriskConf.filename == EXTENSIONS_FILENAME,
-            AsteriskConf.category == category,
-            AsteriskConf.var_name == "exten",
-            AsteriskConf.var_val.like(f"{exten},%"),
-            AsteriskConf.var_val.like("%Answer()%"),
-        )
-        .first()
-        is not None
-    )
+    for line in lines:
+        if not (
+            db_cdr.query(AsteriskConf)
+            .filter(
+                AsteriskConf.instance_id == instance_id,
+                AsteriskConf.filename == EXTENSIONS_FILENAME,
+                AsteriskConf.category == category,
+                AsteriskConf.var_name == "exten",
+                AsteriskConf.var_val == line,
+            )
+            .first()
+        ):
+            return False
+    return True
 
 
 def _ensure_vm_access_codes(db_cdr: Session, instance_id: int) -> bool:
@@ -263,7 +293,7 @@ def _ensure_vm_access_codes(db_cdr: Session, instance_id: int) -> bool:
     for context in VM_CONTEXTS:
         cat_metric = _context_cat_metric(db_cdr, instance_id, context)
         for exten, lines in VM_ACCESS_EXTENSIONS:
-            if _vm_access_is_complete(db_cdr, instance_id, context, exten):
+            if _vm_access_is_complete(db_cdr, instance_id, context, lines):
                 continue
             _delete_exten_pattern(db_cdr, instance_id, context, exten)
             start_var = _next_var_metric(db_cdr, instance_id, context)

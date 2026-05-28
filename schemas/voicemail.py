@@ -65,3 +65,61 @@ class VoicemailResponse(BaseModel):
     email: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class VoicemailUserBindingRequest(BaseModel):
+    user_id: str
+    mailbox: str
+    context: str = DEFAULT_VM_CONTEXT
+
+    @field_validator("user_id")
+    @classmethod
+    def user_id_name(cls, value: str) -> str:
+        return validate_mailbox(value)
+
+    @field_validator("mailbox")
+    @classmethod
+    def mailbox_name(cls, value: str) -> str:
+        return validate_mailbox(value)
+
+    @field_validator("context")
+    @classmethod
+    def vm_context(cls, value: str) -> str:
+        return validate_vm_context(value)
+
+
+class VoicemailUserBindingResponse(BaseModel):
+    user_id: str
+    mailbox: str
+    context: str
+    linked: bool = True
+
+
+class VoicemailUserUnbindRequest(BaseModel):
+    user_id: str
+    mailbox: str | None = None
+    context: str = DEFAULT_VM_CONTEXT
+
+    @field_validator("user_id")
+    @classmethod
+    def user_id_name(cls, value: str) -> str:
+        return validate_mailbox(value)
+
+    @field_validator("mailbox")
+    @classmethod
+    def mailbox_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return validate_mailbox(value)
+
+    @field_validator("context")
+    @classmethod
+    def vm_context(cls, value: str) -> str:
+        return validate_vm_context(value)
+
+
+class VoicemailUserUnbindResponse(BaseModel):
+    user_id: str
+    mailbox: str | None = None
+    context: str
+    unlinked: bool = True
