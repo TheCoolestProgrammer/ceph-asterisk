@@ -228,6 +228,7 @@ async def create_voicemail_box(
             instance.name,
             data,
             instance=instance,
+            db=db,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

@@ -30,7 +30,7 @@ from services.instance_default_configs import (
     get_db_config_templates,
     get_disk_config_templates,
 )
-from services.instance_pjsip_seed import seed_default_pjsip_users
+from services.instance_pjsip_seed import seed_default_pjsip_users, get_test_pjsip_users
 from services.pjsip_schema import ensure_pjsip_schema
 from services.filebeat_config import write_filebeat_config
 from services.instance_container import run_asterisk_container
@@ -40,6 +40,7 @@ from utils.instance_paths import (
     writable_config_dir,
     writable_config_dir_for_name,
 )
+
 # from models.sip_user import SIPUser
 from schemas.asterisk import (
     AsteriskInstanceCreate,
@@ -49,7 +50,6 @@ from schemas.asterisk import (
     CDRState,
 )
 from sqlalchemy.orm import Session
-from sqlalchemy import select
 from panoramisk import Manager, Message
 
 router = APIRouter(prefix="/instances")
@@ -58,13 +58,15 @@ router = APIRouter(prefix="/instances")
 async def unload_module(
     modlue: str, instance_name: str, db: SessionLocal = Depends(get_db)
 ):
-    # stmt = select(AsteriskInstance).where(AsteriskInstance.name==instance_name)
-    # result = session.execute(stmt)
     instance = (
         db.query(AsteriskInstance)
         .filter(AsteriskInstance.name == instance_name)
         .first()
     )
+    if instance is None:
+        raise HTTPException(
+            status_code=404, detail=f"Instance '{instance_name}' not found"
+        )
 
     manager = Manager(
         host="asterisk-" + instance.name,
@@ -95,13 +97,15 @@ async def unload_module(
 async def send_ami_command(
     command: str, instance_name: str, db: SessionLocal = Depends(get_db)
 ):
-    # stmt = select(AsteriskInstance).where(AsteriskInstance.name==instance_name)
-    # result = session.execute(stmt)
     instance = (
         db.query(AsteriskInstance)
         .filter(AsteriskInstance.name == instance_name)
         .first()
     )
+    if instance is None:
+        raise HTTPException(
+            status_code=404, detail=f"Instance '{instance_name}' not found"
+        )
 
     manager = Manager(
         host="asterisk-" + instance.name,
@@ -127,21 +131,6 @@ async def send_ami_command(
         if manager:
             manager.close()
         raise HTTPException(status_code=500, detail=f"AMI Error: {str(e)}")
-
-
-@router.get("/get_contexts/{instance_name}")
-async def get_contexts_route(
-    instance_name: str, db: SessionLocal = Depends(get_db)
-) -> list[str]:
-    cmd = "dialplan show"
-    contexts = []
-    response = await send_ami_command(cmd, instance_name, db)
-    for i in response.Output:
-        print(i)
-        if "Context" in i:
-            context_name = i.split("'")[1]
-            contexts.append(context_name)
-    return contexts
 
 
 @router.post("/cdr_change_status")
@@ -256,7 +245,11 @@ async def create_instance(
 
         try:
             create_default_configs(
-                config_dir, instance, transport_type, db_cdr, db_instance.id
+                config_dir,
+                instance,
+                transport_type,
+                db_cdr,
+                db_instance.id,
             )
             ensure_pjsip_schema(db_cdr)
             create_ast_config_view(db_cdr, db_instance.id)
@@ -274,23 +267,21 @@ async def create_instance(
                 db_cdr,
                 db_instance.name,
                 transport_type,
+                test_users=get_test_pjsip_users(),
             )
             from services.pjsip_disk_sync import write_pjsip_users_conf
-            from services.voicemail_config import seed_test_voicemail_boxes
-            from utils.voicemail_dialplan import ensure_voicemail_dialplan
-
-            seed_test_voicemail_boxes(
-                db_cdr, db_instance.id, db_instance.name, instance=db_instance
+            from services.voicemail_config import (
+                seed_test_voicemail_boxes,
+                get_test_voicemail_boxes,
             )
-            ensure_voicemail_dialplan(db_cdr, db_instance.id)
+            seed_test_voicemail_boxes(
+                db_cdr,
+                db_instance.id,
+                db_instance.name,
+                instance=db_instance,
+                test_boxes=get_test_voicemail_boxes(),
+            )
             write_pjsip_users_conf(db_instance, db_cdr)
-
-        from utils.instance_voicemail_spool import ensure_instance_voicemail_dir
-
-        boxes = []
-        if create_test_users:
-            boxes = ["101", "102"]
-        ensure_instance_voicemail_dir(db_instance, boxes or None)
 
         background_tasks.add_task(_start_asterisk_container_task, db_instance.id)
 
@@ -414,7 +405,9 @@ async def update_instance(
     effective_rtp_start = (
         new_rtp_start if new_rtp_start is not None else instance.rtp_port_start
     )
-    effective_rtp_end = new_rtp_end if new_rtp_end is not None else instance.rtp_port_end
+    effective_rtp_end = (
+        new_rtp_end if new_rtp_end is not None else instance.rtp_port_end
+    )
 
     if new_rtp_start is not None or new_rtp_end is not None:
         if effective_rtp_start >= effective_rtp_end:

@@ -1,4 +1,4 @@
-"""Создание тестовых PJSIP-пользователей при создании АТС."""
+"""Создание PJSIP-пользователей при создании АТС."""
 
 from sqlalchemy.orm import Session
 
@@ -6,32 +6,45 @@ from models.sip_user import PjsipAor, PjsipAuth, PjsipEndpoint
 from services.pjsip_disk_sync import _format_callerid
 
 
-DEFAULT_TEST_USERS: tuple[dict[str, str | int], ...] = (
-    {
-        "username": "101",
-        "password": "strongpassword",
-        "callerid": "Test Operator 101",
-        "context": "from-internal",
-    },
-    {
-        "username": "102",
-        "password": "testpass102",
-        "callerid": "Test Operator 102",
-        "context": "from-internal",
-    },
-)
+def get_test_pjsip_users() -> tuple[dict[str, str | int], ...]:
+    """Возвращает набор тестовых PJSIP-пользователей."""
+    return (
+        {
+            "username": "101",
+            "password": "strongpassword",
+            "callerid": "Test Operator 101",
+            "context": "from-internal",
+        },
+        {
+            "username": "102",
+            "password": "testpass102",
+            "callerid": "Test Operator 102",
+            "context": "from-internal",
+        },
+    )
 
 
 def seed_default_pjsip_users(
     cdr_db: Session,
     instance_name: str,
     transport_type: str,
+    test_users: tuple[dict[str, str | int], ...] | None = None,
 ) -> list[str]:
-    """Создаёт пару тестовых endpoint'ов в ps_*; пропускает уже существующие."""
+    """Создаёт endpoint'ы в ps_*; пропускает уже существующие.
+
+    Args:
+        cdr_db: Сессия базы данных
+        instance_name: Имя экземпляра АТС
+        transport_type: Тип транспорта
+        test_users: Кортеж с данными пользователей. По умолчанию None (пустой список)
+    """
     created: list[str] = []
     transport = f"transport-{transport_type}"
 
-    for user in DEFAULT_TEST_USERS:
+    # Если тестовые данные не переданы, используем пустой список
+    users_to_create = test_users if test_users is not None else ()
+
+    for user in users_to_create:
         username = str(user["username"])
         existing = (
             cdr_db.query(PjsipEndpoint)

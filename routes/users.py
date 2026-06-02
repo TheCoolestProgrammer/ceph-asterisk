@@ -10,25 +10,36 @@ from models.sip_user import PjsipEndpoint, PjsipAor, PjsipAuth
 from services.pjsip_disk_sync import _format_callerid, write_pjsip_users_conf
 from services.voicemail_config import create_voicemail_box, mailbox_exists
 from schemas.voicemail import VoicemailCreate
-from utils.voicemail_dialplan import ensure_voicemail_dialplan
 # from schemas.asterisk import SIPUserCreate, SIPUserResponse, SIPUserUpdate
 from sqlalchemy.orm import Session, joinedload
-from schemas.sip import SIPUserCreate,AuthSchema, AorSchema, SIPUserItem,SIPUserResponse, AuthUpdate, AorUpdate, SIPUserUpdate
+from schemas.sip import (
+    SIPUserCreate,
+    AuthSchema,
+    AorSchema,
+    SIPUserItem,
+    SIPUserResponse,
+    AuthUpdate,
+    AorUpdate,
+    SIPUserUpdate,
+)
+
 router = APIRouter(prefix="/instances/{instance_id}/users")
 
 
-
-
 @router.post("/")
-def create_sip_user(user_data: SIPUserCreate, 
-                    instance_id:int = Path(...), 
-                    db: Session = Depends(get_db),
-                    cdr_db: Session = Depends(get_cdr_db)):
+def create_sip_user(
+    user_data: SIPUserCreate,
+    instance_id: int = Path(...),
+    db: Session = Depends(get_db),
+    cdr_db: Session = Depends(get_cdr_db),
+):
     # Проверяем, нет ли уже такого пользователя
-    instance = db.query(AsteriskInstance).filter(AsteriskInstance.id==instance_id).first()
+    instance = (
+        db.query(AsteriskInstance).filter(AsteriskInstance.id == instance_id).first()
+    )
     if not instance:
         raise HTTPException(status_code=400, detail="instance does not exists")
-    
+
     # existing = cdr_db.query(PjsipEndpoint)\
     #     .join(PjsipAor, PjsipEndpoint.aors == PjsipAor.id)\
     #     .filter(PjsipEndpoint.id == user_data.username)\
@@ -39,15 +50,16 @@ def create_sip_user(user_data: SIPUserCreate,
     #     .filter(PjsipAor.reg_server == instance.name)\
     #     .filter()\
     #     .first()
-    existing = cdr_db.query(PjsipEndpoint)\
-        .options(joinedload(PjsipEndpoint.aors_fk), joinedload(PjsipEndpoint.auths_fk))\
-        .join(PjsipAor, PjsipEndpoint.aors_id == PjsipAor.pk)\
-        .filter(PjsipAor.reg_server == instance.name)\
-        .filter(PjsipEndpoint.id==user_data.username)\
+    existing = (
+        cdr_db.query(PjsipEndpoint)
+        .options(joinedload(PjsipEndpoint.aors_fk), joinedload(PjsipEndpoint.auths_fk))
+        .join(PjsipAor, PjsipEndpoint.aors_id == PjsipAor.pk)
+        .filter(PjsipAor.reg_server == instance.name)
+        .filter(PjsipEndpoint.id == user_data.username)
         .first()
+    )
     if existing:
         raise HTTPException(status_code=400, detail="User already exists")
-    
 
     try:
         # 1. Создаем AOR (регистрация)
@@ -56,16 +68,16 @@ def create_sip_user(user_data: SIPUserCreate,
             max_contacts=user_data.max_contacts,
             reg_server=instance.name,
         )
-        
+
         # 2. Создаем Auth (пароль)
         new_auth = PjsipAuth(
             id=f"{user_data.username}-auth",
             username=user_data.username,
-            password=user_data.password
+            password=user_data.password,
         )
         cdr_db.add(new_aor)
         cdr_db.add(new_auth)
-        cdr_db.flush() 
+        cdr_db.flush()
         # 3. Создаем Endpoint (логика)
         new_endpoint = PjsipEndpoint(
             id=user_data.username,
@@ -93,10 +105,10 @@ def create_sip_user(user_data: SIPUserCreate,
                     link_endpoint_mwi=True,
                 ),
                 instance=instance,
+                db=db,
             )
         else:
             new_endpoint.mailboxes = f"{user_data.username}@default"
-            ensure_voicemail_dialplan(cdr_db, instance_id)
             cdr_db.commit()
 
         write_pjsip_users_conf(instance, cdr_db)
@@ -107,77 +119,102 @@ def create_sip_user(user_data: SIPUserCreate,
             "voicemail": f"{user_data.username}@default",
             "voicemail_pin": "4242",
         }
-    
+
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
 
 
-@router.get("/", response_model=list[SIPUserItem]) # Или SIPUserResponse
-async def get_sip_users(instance_id: int = Path(...),
-                        db: Session = Depends(get_db),
-                        cdr_db: Session = Depends(get_cdr_db)):
-    
-    instance = db.query(AsteriskInstance).filter(AsteriskInstance.id == instance_id).first()
+@router.get("/", response_model=list[SIPUserItem])  # Или SIPUserResponse
+async def get_sip_users(
+    instance_id: int = Path(...),
+    db: Session = Depends(get_db),
+    cdr_db: Session = Depends(get_cdr_db),
+):
+
+    instance = (
+        db.query(AsteriskInstance).filter(AsteriskInstance.id == instance_id).first()
+    )
     if not instance:
         raise HTTPException(status_code=400, detail="instance does not exists")
-    
-    numbers = cdr_db.query(PjsipEndpoint)\
-        .options(joinedload(PjsipEndpoint.aors_fk), joinedload(PjsipEndpoint.auths_fk))\
-        .join(PjsipAor, PjsipEndpoint.aors_id == PjsipAor.pk)\
-        .filter(PjsipAor.reg_server == instance.name)\
+
+    numbers = (
+        cdr_db.query(PjsipEndpoint)
+        .options(joinedload(PjsipEndpoint.aors_fk), joinedload(PjsipEndpoint.auths_fk))
+        .join(PjsipAor, PjsipEndpoint.aors_id == PjsipAor.pk)
+        .filter(PjsipAor.reg_server == instance.name)
         .all()
-    
+    )
+
     return numbers
 
-@router.get("/{endpoint_id}", response_model=Optional[SIPUserItem]) #под username понимается номер аля 101
-async def get_sip_user(endpoint_id: str = Path(...),
-                        instance_id: int = Path(...),
-                        db: Session = Depends(get_db),
-                        cdr_db: Session = Depends(get_cdr_db)):
-    
-    instance = db.query(AsteriskInstance).filter(AsteriskInstance.id == instance_id).first()
+
+@router.get(
+    "/{endpoint_id}", response_model=Optional[SIPUserItem]
+)  # под username понимается номер аля 101
+async def get_sip_user(
+    endpoint_id: str = Path(...),
+    instance_id: int = Path(...),
+    db: Session = Depends(get_db),
+    cdr_db: Session = Depends(get_cdr_db),
+):
+
+    instance = (
+        db.query(AsteriskInstance).filter(AsteriskInstance.id == instance_id).first()
+    )
     if not instance:
         raise HTTPException(status_code=400, detail="instance does not exists")
-    
-    number = cdr_db.query(PjsipEndpoint)\
-        .options(joinedload(PjsipEndpoint.aors_fk), joinedload(PjsipEndpoint.auths_fk))\
-        .join(PjsipAor, PjsipEndpoint.aors_id == PjsipAor.pk)\
-        .filter(PjsipAor.reg_server == instance.name)\
-        .filter(PjsipEndpoint.id==endpoint_id)\
-        .first() #в случае чего можно заменить на PjsipAuth.id==username
-    
+
+    number = (
+        cdr_db.query(PjsipEndpoint)
+        .options(joinedload(PjsipEndpoint.aors_fk), joinedload(PjsipEndpoint.auths_fk))
+        .join(PjsipAor, PjsipEndpoint.aors_id == PjsipAor.pk)
+        .filter(PjsipAor.reg_server == instance.name)
+        .filter(PjsipEndpoint.id == endpoint_id)
+        .first()
+    )  # в случае чего можно заменить на PjsipAuth.id==username
+
     return number
+
+
 @router.put("/{endpoint_id}", response_model=SIPUserItem)
 async def update_sip_user_by_creds(
     update_data: SIPUserUpdate,
-    endpoint_id: str = Path(...),   # SIP логин (например '101')
+    endpoint_id: str = Path(...),  # SIP логин (например '101')
     instance_id: int = Path(...),
     cdr_db: Session = Depends(get_cdr_db),
-    db:Session=Depends(get_db)
+    db: Session = Depends(get_db),
 ):
-    instance = db.query(AsteriskInstance).filter(AsteriskInstance.id==instance_id).first()
+    instance = (
+        db.query(AsteriskInstance).filter(AsteriskInstance.id == instance_id).first()
+    )
     if not instance:
         raise HTTPException(status_code=400, detail="instance does not exists")
 
     # 1. Поиск по связанным таблицам
-    endpoint = cdr_db.query(PjsipEndpoint)\
-        .join(PjsipAor, PjsipEndpoint.aors_id == PjsipAor.pk)\
-        .join(PjsipAuth, PjsipEndpoint.auths_id == PjsipAuth.pk)\
-        .options(joinedload(PjsipEndpoint.aors_fk), joinedload(PjsipEndpoint.auths_fk))\
-        .filter(PjsipAor.reg_server == instance.name)\
-        .filter(PjsipEndpoint.id == endpoint_id)\
+    endpoint = (
+        cdr_db.query(PjsipEndpoint)
+        .join(PjsipAor, PjsipEndpoint.aors_id == PjsipAor.pk)
+        .join(PjsipAuth, PjsipEndpoint.auths_id == PjsipAuth.pk)
+        .options(joinedload(PjsipEndpoint.aors_fk), joinedload(PjsipEndpoint.auths_fk))
+        .filter(PjsipAor.reg_server == instance.name)
+        .filter(PjsipEndpoint.id == endpoint_id)
         .first()
+    )
 
     if not endpoint:
         raise HTTPException(
-            status_code=404, 
-            detail=f"User with id '{endpoint_id}' on server '{instance.name}' not found"
+            status_code=404,
+            detail=f"User with id '{endpoint_id}' on server '{instance.name}' not found",
         )
 
     try:
         # 2. Обновление полей самого Endpoint (transport, context и т.д.)
-        endpoint_dict = update_data.model_dump(exclude={'auth', 'aor'}, exclude_unset=True)
+        endpoint_dict = update_data.model_dump(
+            exclude={"auth", "aor"}, exclude_unset=True
+        )
         for key, value in endpoint_dict.items():
             setattr(endpoint, key, value)
 
@@ -205,27 +242,31 @@ async def update_sip_user_by_creds(
 
 @router.delete("/delete/{endpoint_id}", status_code=200)
 async def delete_sip_user(
-    instance_id: int=Path(...), 
-    endpoint_id: str=Path(...), 
+    instance_id: int = Path(...),
+    endpoint_id: str = Path(...),
     cdr_db: Session = Depends(get_cdr_db),
-    db:Session=Depends(get_db)
+    db: Session = Depends(get_db),
 ):
-    instance = db.query(AsteriskInstance).filter(AsteriskInstance.id==instance_id).first()
+    instance = (
+        db.query(AsteriskInstance).filter(AsteriskInstance.id == instance_id).first()
+    )
     if not instance:
         raise HTTPException(status_code=400, detail="instance does not exists")
 
     # 1. Ищем Endpoint, чтобы получить доступ к связанным ID (auth и aor)
-    endpoint = cdr_db.query(PjsipEndpoint)\
-        .join(PjsipAor, PjsipEndpoint.aors_id == PjsipAor.pk)\
-        .join(PjsipAuth, PjsipEndpoint.auths_id == PjsipAuth.pk)\
-        .filter(PjsipAor.reg_server == instance.name)\
-        .filter(PjsipEndpoint.id== endpoint_id)\
+    endpoint = (
+        cdr_db.query(PjsipEndpoint)
+        .join(PjsipAor, PjsipEndpoint.aors_id == PjsipAor.pk)
+        .join(PjsipAuth, PjsipEndpoint.auths_id == PjsipAuth.pk)
+        .filter(PjsipAor.reg_server == instance.name)
+        .filter(PjsipEndpoint.id == endpoint_id)
         .first()
+    )
 
     if not endpoint:
         raise HTTPException(
-            status_code=404, 
-            detail=f"User {endpoint_id} on server {instance.name} not found"
+            status_code=404,
+            detail=f"User {endpoint_id} on server {instance.name} not found",
         )
 
     try:
@@ -236,7 +277,7 @@ async def delete_sip_user(
 
         # 3. Удаляем Endpoint (главную запись)
         cdr_db.delete(endpoint)
-        
+
         # 4. Вручную удаляем связанные записи, если они не удалились каскадом БД
         if auth_obj:
             cdr_db.delete(auth_obj)
@@ -245,9 +286,8 @@ async def delete_sip_user(
 
         cdr_db.commit()
         write_pjsip_users_conf(instance, cdr_db)
-        return {"message":"success"} # При 204 коде тело ответа не возвращается
+        return {"message": "success"}  # При 204 коде тело ответа не возвращается
 
     except Exception as e:
         cdr_db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-

@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from database import get_db, get_cdr_db
 from models.asterisk_instance import AsteriskInstance
 from models.ast_conf import AsteriskConf
+from services.dialplan_contexts import list_dialplan_contexts
 from schemas.dialplan import (
     DialplanContextUpdate,
     DialplanResponse,
@@ -64,9 +64,9 @@ async def get_dialplan_contexts(
     db_cdr: Session = Depends(get_cdr_db),
 ):
     """
-    Получить список контекстов / секций диалплана.
+    Список контекстов диалплана (для редактора и поля context в PJSIP).
 
-    Возвращает уникальные значения category из extensions.conf.
+    Возвращает уникальные category из extensions.conf в ast_config.
     """
     instance = (
         db.query(AsteriskInstance).filter(AsteriskInstance.id == instance_id).first()
@@ -74,18 +74,7 @@ async def get_dialplan_contexts(
     if not instance:
         raise HTTPException(status_code=404, detail="Instance not found")
 
-    rows = (
-        db_cdr.query(AsteriskConf.category)
-        .filter(
-            AsteriskConf.instance_id == instance_id,
-            AsteriskConf.filename == filename,
-        )
-        .group_by(AsteriskConf.category)
-        .order_by(func.min(AsteriskConf.cat_metric))
-        .all()
-    )
-
-    return [row[0] for row in rows]
+    return list_dialplan_contexts(db_cdr, instance_id, filename)
 
 
 @router.get("/{context}", response_model=DialplanResponse)

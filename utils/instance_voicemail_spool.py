@@ -35,6 +35,37 @@ def _chown_tree(path: str, uid: int, gid: int) -> None:
                 pass
 
 
+def ensure_mailbox_voicemail_dir(
+    instance: AsteriskInstance,
+    mailbox: str,
+    *,
+    context: str = VM_CONTEXT_NAME,
+) -> str:
+    """Создаёт папки для конкретного mailbox'a при его создании."""
+    path = instance_voicemail_docker_dir(instance)
+
+    # Создаём папки на docker пути
+    for folder in VM_MAILBOX_FOLDERS:
+        os.makedirs(os.path.join(path, context, mailbox, folder), exist_ok=True)
+
+    uid, gid = config.ASTERISK_UID, config.ASTERISK_GID
+    _chown_tree(os.path.join(path, context, mailbox), uid, gid)
+    try:
+        os.chmod(os.path.join(path, context, mailbox), 0o775)
+    except OSError:
+        pass
+
+    # Создаём папки на API пути (если отличается)
+    api_path = instance_voicemail_host_dir(instance)
+    if api_path != path:
+        for folder in VM_MAILBOX_FOLDERS:
+            dest = os.path.join(api_path, context, mailbox, folder)
+            os.makedirs(dest, exist_ok=True)
+        _chown_tree(os.path.join(api_path, context, mailbox), uid, gid)
+
+    return path
+
+
 def ensure_instance_voicemail_dir(
     instance: AsteriskInstance,
     mailboxes: list[str] | None = None,
@@ -43,13 +74,17 @@ def ensure_instance_voicemail_dir(
 ) -> str:
     """
     {config}/voicemail → /var/spool/asterisk/voicemail.
-    Создаёт default/{mailbox}/INBOX и выставляет владельца asterisk (UID из .env).
+    Создаёт папки для указанных mailbox'ов и выставляет владельца asterisk (UID из .env).
+    Если mailboxes=None, папки не создаются.
     """
+    if mailboxes is None:
+        # Ничего не создаём — папки создадутся при добавлении конкретных ящиков
+        return instance_voicemail_docker_dir(instance)
+
     path = instance_voicemail_docker_dir(instance)
     os.makedirs(path, exist_ok=True)
 
-    boxes = mailboxes or ["101", "102"]
-    for box in boxes:
+    for box in mailboxes:
         for folder in VM_MAILBOX_FOLDERS:
             os.makedirs(os.path.join(path, context, box, folder), exist_ok=True)
 
@@ -64,7 +99,7 @@ def ensure_instance_voicemail_dir(
     if api_path != path:
         if not os.path.isdir(api_path):
             os.makedirs(api_path, exist_ok=True)
-        for box in boxes:
+        for box in mailboxes:
             for folder in VM_MAILBOX_FOLDERS:
                 dest = os.path.join(api_path, context, box, folder)
                 os.makedirs(dest, exist_ok=True)

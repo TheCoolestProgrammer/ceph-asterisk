@@ -18,7 +18,6 @@ from services.asterisk_reload import (
 from services.pjsip_schema import ensure_pjsip_schema
 from services.voicemail_modules import ensure_voicemail_modules
 from utils.dialplan_repair import repair_internal_dialplan, repair_queue_and_moh
-from utils.voicemail_dialplan import ensure_voicemail_dialplan
 from services.voicemail_sounds import (
     check_voicemail_prompts,
     warn_if_sounds_mount_overrides_defaults,
@@ -58,7 +57,6 @@ async def reload_instance(
         sync_pjsip_views_for_instance(db, db_cdr, instance)
         dialplan_fixed = repair_internal_dialplan(db_cdr, instance_id)
         media_fixed = repair_queue_and_moh(db_cdr, instance_id)
-        vm_dialplan_fixed = ensure_voicemail_dialplan(db_cdr, instance_id)
         from utils.asterisk_sounds import ensure_astsoundsdir_on_disk
 
         sounds_conf_fixed = ensure_astsoundsdir_on_disk(instance)
@@ -70,8 +68,6 @@ async def reload_instance(
             msg += "; internal dialplan repaired (Echo -> Dial)"
         if media_fixed:
             msg += "; queue/MOH dialplan repaired"
-        if vm_dialplan_fixed:
-            msg += "; voicemail dialplan updated (cat_metric fix, 777, 8097)"
         if schema_added:
             msg += f"; schema columns added: {', '.join(schema_added)}"
         sounds_warn = warn_if_sounds_mount_overrides_defaults(instance)
@@ -88,15 +84,17 @@ async def reload_instance(
         raise HTTPException(status_code=500, detail=detail)
 
 
-@router.post("/{instance_id}/seed-test-users")
-async def seed_test_users(
+@router.post("/{instance_id}/seed-test-dialplan")
+async def seed_test_dialplan(
     instance_id: int,
     db: Session = Depends(get_db),
     db_cdr: Session = Depends(get_cdr_db),
 ):
-    """Добавляет тестовых абонентов 101/102 (если ещё нет) и обновляет pjsip_users.conf."""
-    from services.instance_pjsip_seed import seed_default_pjsip_users
-    from services.pjsip_disk_sync import write_pjsip_users_conf
+    """
+    Тестовый диалплан: from-internal / from-external (777, _XXX, *97, 8000)
+    и очередь test-support в queues.conf.
+    """
+    from services.instance_default_configs import seed_test_dialplan as apply_test_dialplan
 
     instance = (
         db.query(AsteriskInstance).filter(AsteriskInstance.id == instance_id).first()
@@ -104,11 +102,60 @@ async def seed_test_users(
     if not instance:
         raise HTTPException(status_code=404, detail="Instance not found")
 
-    from services.voicemail_config import seed_test_voicemail_boxes
+    transport_type = "udp"
+    row_counts = apply_test_dialplan(db_cdr, instance_id, transport_type)
+    dialplan_fixed = repair_internal_dialplan(db_cdr, instance_id)
+    media_fixed = repair_queue_and_moh(db_cdr, instance_id)
+    try:
+        reload_asterisk_config(instance.name)
+    except AsteriskReloadError as e:
+        raise HTTPException(status_code=500, detail=e.message) from e
 
-    created = seed_default_pjsip_users(db_cdr, instance.name, "udp")
+    msg = "Тестовый диалплан записан в ast_config"
+    if dialplan_fixed:
+        msg += "; internal dialplan repaired"
+    if media_fixed:
+        msg += "; queue/MOH repaired"
+
+    return {
+        "row_counts": row_counts,
+        "contexts": ["from-internal", "from-external"],
+        "message": msg,
+    }
+
+
+@router.post("/{instance_id}/seed-test-users")
+async def seed_test_users(
+    instance_id: int,
+    db: Session = Depends(get_db),
+    db_cdr: Session = Depends(get_cdr_db),
+):
+    """Добавляет тестовых абонентов 101/102 (если ещё нет) и обновляет pjsip_users.conf."""
+    from services.instance_pjsip_seed import (
+        seed_default_pjsip_users,
+        get_test_pjsip_users,
+    )
+    from services.pjsip_disk_sync import write_pjsip_users_conf
+    from services.voicemail_config import (
+        seed_test_voicemail_boxes,
+        get_test_voicemail_boxes,
+    )
+
+    instance = (
+        db.query(AsteriskInstance).filter(AsteriskInstance.id == instance_id).first()
+    )
+    if not instance:
+        raise HTTPException(status_code=404, detail="Instance not found")
+
+    created = seed_default_pjsip_users(
+        db_cdr, instance.name, "udp", test_users=get_test_pjsip_users()
+    )
     vm_created = seed_test_voicemail_boxes(
-        db_cdr, instance_id, instance.name, instance=instance
+        db_cdr,
+        instance_id,
+        instance.name,
+        instance=instance,
+        test_boxes=get_test_voicemail_boxes(),
     )
     sync_pjsip_views_for_instance(db, db_cdr, instance)
     write_pjsip_users_conf(instance, db_cdr)
@@ -139,7 +186,10 @@ async def rebuild_asterisk_image(
     try:
         import docker
 
-        from utils.asterisk_image import ensure_asterisk_image, image_has_voicemail_sounds
+        from utils.asterisk_image import (
+            ensure_asterisk_image,
+            image_has_voicemail_sounds,
+        )
 
         ensure_asterisk_image(docker.from_env(), force_rebuild=True)
         has_sounds = image_has_voicemail_sounds()
@@ -172,21 +222,13 @@ async def recreate_container(
         raise HTTPException(status_code=404, detail="Instance not found")
 
     try:
-        from services.voicemail_config import list_voicemail_boxes
         from services.voicemail_modules import ensure_voicemail_modules
-        from utils.instance_voicemail_spool import (
-            ensure_instance_voicemail_dir,
-            warn_if_empty_sounds_dir,
-        )
-        from utils.voicemail_dialplan import ensure_voicemail_dialplan
+        from utils.instance_voicemail_spool import warn_if_empty_sounds_dir
         from services.voicemail_sounds import warn_if_sounds_mount_overrides_defaults
         from utils.asterisk_sounds import ensure_astsoundsdir_on_disk
 
         sync_pjsip_views_for_instance(db, db_cdr, instance)
         ensure_voicemail_modules(instance)
-        dialplan_fixed = ensure_voicemail_dialplan(db_cdr, instance_id)
-        boxes = [b.mailbox for b in list_voicemail_boxes(db_cdr, instance_id)]
-        ensure_instance_voicemail_dir(instance, boxes or None)
         if ensure_astsoundsdir_on_disk(instance):
             msg_extra = "astsoundsdir обновлён в asterisk.conf; "
         else:
@@ -199,8 +241,6 @@ async def recreate_container(
         msg = f"{msg_extra}Container recreated"
         if rebuild_image:
             msg += " (Asterisk image rebuilt with voicemail sounds)"
-        if dialplan_fixed:
-            msg += "; dialplan 777/*97/8097 обновлён"
         for warn in (
             warn_if_empty_sounds_dir(instance),
             warn_if_sounds_mount_overrides_defaults(instance),
@@ -302,7 +342,8 @@ async def pjsip_diagnose(
             "sip_username": row["username"],
             "password": row["password"],
             "aor": row["aors"],
-            "registered": row["aors"] in registrations_out and row["id"] in endpoints_out,
+            "registered": row["aors"] in registrations_out
+            and row["id"] in endpoints_out,
         }
         for row in endpoints_db
     ]
@@ -329,7 +370,8 @@ async def pjsip_diagnose(
             "auths_in_view": _count(auth_view),
         },
         "endpoints_in_db": [
-            {k: v for k, v in dict(row).items() if k != "password"} for row in endpoints_db
+            {k: v for k, v in dict(row).items() if k != "password"}
+            for row in endpoints_db
         ],
         "sip_accounts": sip_accounts,
         "sip_server": {
@@ -346,6 +388,7 @@ async def pjsip_diagnose(
             "pjsip show registrations пусто + Unavailable = Contact не сохранён; нужен contact=memory в sorcery.conf + reload",
             "не звоните с 101 на 101 — нужны два софтфона (101 и 102)",
             "«Удалённая сторона не найдена» = у callee нет Contact (не зарегистрирован)",
+            "POST /instances/{id}/seed-test-dialplan — тестовый from-internal/from-external",
             "POST /instances/{id}/seed-test-users — добавить 101 и 102, затем reload",
             "8000 без звука: нужны RTP-порты (network.rtp_reachable) и res_musiconhold.so",
             f"RTP UDP {instance.rtp_port_start}-{instance.rtp_port_end} должны быть проброшены в docker",

@@ -12,15 +12,14 @@ from schemas.cdr import CDRRecords, CDRInputData
 
 router = APIRouter(prefix="/cdr")
 
-@router.get("/"
-            ,response_model=CDRRecords
-            )
+
+@router.get("/", response_model=CDRRecords)
 async def get_cdr_history(
     data: CDRInputData = Depends(),
     db: Session = Depends(get_cdr_db),
 ):
     query = db.query(CDR)
-    
+
     # 1. Применяем фильтры
     if data.instance_name:
         query = query.filter(CDR.uniqueid.like(f"%{data.instance_name}%"))
@@ -39,22 +38,18 @@ async def get_cdr_history(
     total_count = query.count()
 
     # 3. Получаем данные для текущей страницы
-    res = query.order_by(CDR.start.desc())\
-                .limit(data.limit)\
-                .offset(data.offset)\
-                .all()
+    res = query.order_by(CDR.start.desc()).limit(data.limit).offset(data.offset).all()
 
     for i in res:
-        i.instance_name = i.uniqueid.split('-')[0]
+        i.instance_name = i.uniqueid.split("-")[0]
 
     # 4. Возвращаем объект с метаданными
     return {
         "total": total_count,
         "items": res,
         "limit": data.limit,
-        "offset": data.offset
+        "offset": data.offset,
     }
-
 
 
 def row_to_dict(row):
@@ -67,13 +62,14 @@ def row_to_dict(row):
         return dict(row)
 
 
-@router.get("/active/"
-            # response_model=list[ActiveCall]
-            )
+@router.get(
+    "/active/"
+    # response_model=list[ActiveCall]
+)
 async def get_active_calls(
     instance_name: Optional[str] = None, db: Session = Depends(get_db)
 ):
-    #TODO: переписать роут так, чтобы он обращался к ARI/AMI
+    # TODO: переписать роут так, чтобы он обращался к ARI/AMI
 
     return status.HTTP_404_NOT_FOUND
 
@@ -106,8 +102,7 @@ async def get_call_stats(
     else:
         interval = 30
 
-    query = (
-        """
+    query = """
     SELECT 
         COUNT(*) as total_calls,
         SUM(duration) as total_duration,
@@ -124,11 +119,7 @@ async def get_call_stats(
     AND start >= DATE_SUB(NOW(), INTERVAL :interval DAY)
     GROUP BY disposition
     """
-    )
-    params = {
-        "instance_name":f"%{instance_name}%",
-        "interval":interval
-    }
+    params = {"instance_name": f"%{instance_name}%", "interval": interval}
     result = db.execute(text(query), params)
     stats = result.fetchall()
 
@@ -143,7 +134,7 @@ async def get_call_stats(
 async def simulate_calls(
     instance_name: str, count: int = 5, db: Session = Depends(get_db)
 ):
-    #TODO: переписать!
+    # TODO: переписать!
 
     return status.HTTP_404_NOT_FOUND
     # """Симуляция тестовых звонков"""
@@ -164,10 +155,10 @@ async def simulate_calls(
 
     #     # Вставляем тестовый CDR
     #     query = """
-    #     INSERT INTO cdr 
-    #     (calldate, clid, src, dst, dcontext, channel, dstchannel, lastapp, lastdata, 
+    #     INSERT INTO cdr
+    #     (calldate, clid, src, dst, dcontext, channel, dstchannel, lastapp, lastdata,
     #      duration, billsec, disposition, amaflags, accountcode, uniqueid, userfield, instance_name)
-    #     VALUES 
+    #     VALUES
     #     (:calldate, :clid, :src, :dst, :dcontext, :channel, :dstchannel, :lastapp, :lastdata,
     #      :duration, :billsec, :disposition, :amaflags, :accountcode, :uniqueid, :userfield, :instance_name)
     #     """

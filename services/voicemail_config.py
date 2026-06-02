@@ -1,10 +1,9 @@
-"""CRUD голосовых ящиков Asterisk в static realtime (ast_config / voicemail.conf)."""
-
 from __future__ import annotations
 
 from sqlalchemy.orm import Session, joinedload
 
 from models.ast_conf import AsteriskConf
+from models.asterisk_instance import AsteriskInstance
 from models.sip_user import PjsipAor, PjsipEndpoint
 from schemas.voicemail import (
     DEFAULT_VM_CONTEXT,
@@ -14,7 +13,7 @@ from schemas.voicemail import (
     VoicemailUpdate,
 )
 from services.voicemail_modules import ensure_voicemail_modules
-from utils.voicemail_dialplan import ensure_voicemail_dialplan
+from utils.instance_voicemail_spool import ensure_mailbox_voicemail_dir
 
 VOICEMAIL_CONF_FILENAME = "voicemail.conf"
 
@@ -29,6 +28,24 @@ GENERAL_VOICEMAIL_OPTIONS: tuple[tuple[str, str], ...] = (
     ("sendvoicemail", "yes"),
     ("review", "yes"),
 )
+
+
+def get_test_voicemail_boxes() -> tuple[VoicemailCreate, ...]:
+    """Возвращает набор тестовых voicemail ящиков."""
+    return (
+        VoicemailCreate(
+            mailbox="101",
+            password="4242",
+            full_name="Test Operator 101",
+            link_endpoint_mwi=True,
+        ),
+        VoicemailCreate(
+            mailbox="102",
+            password="4242",
+            full_name="Test Operator 102",
+            link_endpoint_mwi=True,
+        ),
+    )
 
 
 def _format_mailbox_val(password: str, full_name: str, email: str | None) -> str:
@@ -46,7 +63,10 @@ def _parse_mailbox_val(var_val: str) -> tuple[str, str, str | None]:
 
 
 def _mailbox_rows_filter(
-    db_cdr: Session, instance_id: int, context: str | None = None, mailbox: str | None = None
+    db_cdr: Session,
+    instance_id: int,
+    context: str | None = None,
+    mailbox: str | None = None,
 ):
     query = db_cdr.query(AsteriskConf).filter(
         AsteriskConf.instance_id == instance_id,
@@ -76,9 +96,7 @@ def _row_to_response(row: AsteriskConf) -> VoicemailResponse:
 
 def _general_exists(db_cdr: Session, instance_id: int) -> bool:
     return (
-        _mailbox_rows_filter(db_cdr, instance_id, context="general")
-        .limit(1)
-        .first()
+        _mailbox_rows_filter(db_cdr, instance_id, context="general").limit(1).first()
         is not None
     )
 
@@ -87,7 +105,9 @@ def _ensure_general_section(db_cdr: Session, instance_id: int) -> None:
     if _general_exists(db_cdr, instance_id):
         return
     cat_metric = 1
-    for var_metric, (var_name, var_val) in enumerate(GENERAL_VOICEMAIL_OPTIONS, start=1):
+    for var_metric, (var_name, var_val) in enumerate(
+        GENERAL_VOICEMAIL_OPTIONS, start=1
+    ):
         db_cdr.add(
             AsteriskConf(
                 instance_id=instance_id,
@@ -204,20 +224,15 @@ def list_voicemail_boxes(db_cdr: Session, instance_id: int) -> list[VoicemailRes
         .order_by(AsteriskConf.cat_metric, AsteriskConf.var_metric)
         .all()
     )
-    return [
-        _row_to_response(row)
-        for row in rows
-        if _is_mailbox_category(row.category)
-    ]
+    return [_row_to_response(row) for row in rows if _is_mailbox_category(row.category)]
 
 
 def get_voicemail_box(
     db_cdr: Session, instance_id: int, mailbox: str, context: str = DEFAULT_VM_CONTEXT
 ) -> VoicemailResponse | None:
-    row = (
-        _mailbox_rows_filter(db_cdr, instance_id, context=context, mailbox=mailbox)
-        .first()
-    )
+    row = _mailbox_rows_filter(
+        db_cdr, instance_id, context=context, mailbox=mailbox
+    ).first()
     if not row:
         return None
     return _row_to_response(row)
@@ -329,6 +344,7 @@ def create_voicemail_box(
     data: VoicemailCreate,
     *,
     instance=None,
+    db=None,
 ) -> VoicemailResponse:
     if mailbox_exists(db_cdr, instance_id, data.mailbox, data.context):
         raise ValueError(
@@ -382,12 +398,22 @@ def create_voicemail_box(
             enable=True,
         )
 
-    ensure_voicemail_dialplan(db_cdr, instance_id)
     if instance is not None:
         ensure_voicemail_modules(instance)
 
     db_cdr.commit()
     db_cdr.refresh(row)
+
+    # Создаём папки для mailbox'a на диске
+    if instance is None and db is not None:
+        instance = (
+            db.query(AsteriskInstance)
+            .filter(AsteriskInstance.id == instance_id)
+            .first()
+        )
+    if instance is not None:
+        ensure_mailbox_voicemail_dir(instance, data.mailbox, context=data.context)
+
     return _row_to_response(row)
 
 
@@ -398,10 +424,9 @@ def update_voicemail_box(
     data: VoicemailUpdate,
     context: str = DEFAULT_VM_CONTEXT,
 ) -> VoicemailResponse:
-    row = (
-        _mailbox_rows_filter(db_cdr, instance_id, context=context, mailbox=mailbox)
-        .first()
-    )
+    row = _mailbox_rows_filter(
+        db_cdr, instance_id, context=context, mailbox=mailbox
+    ).first()
     if not row:
         raise LookupError(f"Voicemail box '{mailbox}@{context}' not found")
 
@@ -445,36 +470,32 @@ def seed_test_voicemail_boxes(
     instance_name: str,
     *,
     instance=None,
+    test_boxes: tuple[VoicemailCreate, ...] | None = None,
 ) -> list[str]:
-    """Создаёт тестовые ящики 101 и 102, если их ещё нет."""
+    """Создаёт voicemail ящики, если их ещё нет.
+
+    Args:
+        db_cdr: Сессия базы данных
+        instance_id: ID экземпляра АТС
+        instance_name: Имя экземпляра АТС
+        instance: Экземпляр АТС (опционально)
+        test_boxes: Кортеж с данными voicemail ящиков. По умолчанию None (пустой список)
+    """
     created: list[str] = []
-    test_boxes = (
-        VoicemailCreate(
-            mailbox="101",
-            password="4242",
-            full_name="Test Operator 101",
-            link_endpoint_mwi=True,
-        ),
-        VoicemailCreate(
-            mailbox="102",
-            password="4242",
-            full_name="Test Operator 102",
-            link_endpoint_mwi=True,
-        ),
-    )
-    for box in test_boxes:
+
+    # Если тестовые данные не переданы, используем пустой список
+    boxes_to_create = test_boxes if test_boxes is not None else ()
+
+    for box in boxes_to_create:
         if mailbox_exists(db_cdr, instance_id, box.mailbox, box.context):
             if box.link_endpoint_mwi:
                 _link_endpoint_mwi(
                     db_cdr, instance_name, box.mailbox, box.context, enable=True
                 )
             continue
-        create_voicemail_box(
-            db_cdr, instance_id, instance_name, box, instance=instance
-        )
+        create_voicemail_box(db_cdr, instance_id, instance_name, box, instance=instance)
         created.append(box.mailbox)
     if not created and instance is not None:
-        ensure_voicemail_dialplan(db_cdr, instance_id)
         ensure_voicemail_modules(instance)
         db_cdr.commit()
     return created

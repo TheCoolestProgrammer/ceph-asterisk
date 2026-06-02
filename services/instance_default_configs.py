@@ -1,63 +1,16 @@
 """Шаблоны конфигов при создании АТС: БД (static realtime) и диск (bootstrap)."""
 
+from sqlalchemy.orm import Session
+
 from config import config
+from models.ast_conf import AsteriskConf
 from schemas.asterisk import AsteriskInstanceCreate
+from utils.ast_config_ini import seed_config_from_ini
 
 
-def get_db_config_templates(
-    instance: AsteriskInstanceCreate,
-    transport_type: str,
-) -> dict[str, str]:
-    """Конфиги, которые сидируются в ast_config."""
-
-    return {
-        # "pjsip.conf": f"""[global]
-        # endpoint_identifier_order=username,ip,anonymous
-        #
-        # [transport-{transport_type}]
-        # type=transport
-        # protocol={transport_type}
-        # bind=0.0.0.0:{instance.sip_port}
-        # {async_tcp}
-        # [101]
-        # type=endpoint
-        # context=from-internal
-        # disallow=all
-        # allow=ulaw,alaw
-        # auth=101-auth
-        # aors=101-aor
-        #
-        # [101-auth]
-        # type=auth
-        # auth_type=userpass
-        # password=strongpassword
-        # username=101
-        #
-        # [101-aor]
-        # type=aor
-        # max_contacts=1
-        # default_expiration=3600
-        #
-        # [200]
-        # type=endpoint
-        # context=from-external
-        # disallow=all
-        # allow=ulaw,alaw
-        # auth=200-auth
-        # aors=200-aor
-        # direct_media=no
-        #
-        # [200-auth]
-        # type=auth
-        # auth_type=userpass
-        # password=customerpass
-        # username=200
-        #
-        # [200-aor]
-        # type=aor
-        # max_contacts=1
-        # """,
-        "extensions.conf": """[from-internal]
+def get_test_extensions_conf(transport_type: str = "udp") -> str:
+    """Возвращает тестовый extensions.conf с примерами диалплана."""
+    return """[from-internal]
 exten => 777,1,NoOp(Сервис 777 от ${CALLERID(num)})
 exten => 777,n,Answer()
 exten => 777,n,Dial(PJSIP/101,30)
@@ -110,7 +63,78 @@ exten => 8097,n,Answer()
 exten => 8097,n,Wait(1)
 exten => 8097,n,VoiceMailMain(${CALLERID(num)}@default)
 exten => 8097,n,Hangup()
-""",
+"""
+
+
+def _get_empty_extensions_conf() -> str:
+    """Возвращает пустой extensions.conf без тестовых диалпланов."""
+    return """[from-internal]
+
+[from-external]
+"""
+
+
+def get_test_queues_conf() -> str:
+    """Возвращает тестовый queues.conf с примером очереди."""
+    return """[general]
+persistentmembers = yes
+
+[test-support]
+strategy = rrmemory
+timeout = 20
+retry = 5
+musicclass = default
+member => PJSIP/101
+member => PJSIP/102
+"""
+
+
+def _get_empty_queues_conf() -> str:
+    """Возвращает пустой queues.conf без тестовых очередей."""
+    return """[general]
+persistentmembers = yes
+"""
+
+
+def seed_test_dialplan(
+    db_cdr: Session,
+    instance_id: int,
+    transport_type: str = "udp",
+) -> dict[str, int]:
+    """Записывает тестовый диалплан (from-internal, from-external) и очередь test-support в ast_config."""
+    filenames = ("extensions.conf", "queues.conf")
+    db_cdr.query(AsteriskConf).filter(
+        AsteriskConf.instance_id == instance_id,
+        AsteriskConf.filename.in_(filenames),
+    ).delete(synchronize_session=False)
+
+    templates = {
+        "extensions.conf": get_test_extensions_conf(transport_type),
+        "queues.conf": get_test_queues_conf(),
+    }
+    row_counts: dict[str, int] = {}
+    for filename, content in templates.items():
+        seed_config_from_ini(db_cdr, instance_id, filename, content)
+        row_counts[filename] = (
+            db_cdr.query(AsteriskConf)
+            .filter(
+                AsteriskConf.instance_id == instance_id,
+                AsteriskConf.filename == filename,
+            )
+            .count()
+        )
+    db_cdr.commit()
+    return row_counts
+
+
+def get_db_config_templates(
+    instance: AsteriskInstanceCreate,
+    transport_type: str,
+) -> dict[str, str]:
+    """Конфиги, которые сидируются в ast_config."""
+
+    return {
+        "extensions.conf": _get_empty_extensions_conf(),
         "voicemail.conf": """[general]
 format = wav49|gsm|wav
 serveremail = asterisk
@@ -123,20 +147,8 @@ sendvoicemail = yes
 review = yes
 
 [default]
-101 => 4242,Test Operator 101
-102 => 4242,Test Operator 102
 """,
-        "queues.conf": """[general]
-persistentmembers = yes
-
-[test-support]
-strategy = rrmemory
-timeout = 20
-retry = 5
-musicclass = default
-member => PJSIP/101
-member => PJSIP/102
-""",
+        "queues.conf": _get_empty_queues_conf(),
         "stasis.conf": """[general]
 enabled=no
 """,
