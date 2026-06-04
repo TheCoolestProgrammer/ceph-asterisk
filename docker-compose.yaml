@@ -1,0 +1,111 @@
+version: '3.8'
+
+services:
+  mysql-asterisk:
+    container_name: ${MYSQL_CONTAINER_NAME}
+    image: mysql:8.0
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_DATABASE_CDR: ${MYSQL_DATABASE_CDR}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ASTERISK_USER: ${MYSQL_ASTERISK_USER}
+      MYSQL_ASTERISK_USER_PASSWORD: ${MYSQL_ASTERISK_USER_PASSWORD}
+    ports:
+      - "${MYSQL_PORT}:3306"
+    volumes:
+      - ./mysql_data:/var/lib/mysql
+      - ./init.sh:/docker-entrypoint-initdb.d/init.sh
+    networks:
+      - ceph-asterisk_default
+
+  openldap:
+    image: osixia/openldap:latest
+    container_name: openldap
+    environment:
+      LDAP_LOG_LEVEL: "256"
+      LDAP_ORGANISATION: "planeta Inc."
+      LDAP_DOMAIN: "planeta.ru"
+      LDAP_BASE_DN: "dc=planeta,dc=ru"
+      LDAP_ADMIN_PASSWORD: "admin"
+      LDAP_CONFIG_PASSWORD: "admin"
+      LDAP_READONLY_USER: "false"
+      LDAP_TLS: "false"
+    ports:
+      - "389:389"
+      - "636:636"
+    volumes:
+      - ./ldap_data:/var/lib/ldap
+      - ./ldap_config:/etc/ldap/slapd.d
+      - ./ldif_files:/container/service/slapd/assets/config/bootstrap/ldif/custom
+    command: --copy-service --loglevel debug
+    networks:
+      - ceph-asterisk_default
+
+  phpldapadmin:
+    image: osixia/phpldapadmin:latest
+    container_name: phpldapadmin
+    environment:
+      PHPLDAPADMIN_LDAP_HOSTS: "openldap"
+      PHPLDAPADMIN_HTTPS: "false"
+    ports:
+      - "8080:80"
+    depends_on:
+      - openldap
+    networks:
+      - ceph-asterisk_default
+
+  fastapi-app:
+    build:
+      context: .
+      dockerfile: dockerfile.web
+    container_name: fastapi-dev
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./:/app
+      - /app/.venv
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - HOST_PROJECT_PATH=/home/vasya/ceph-asterisk
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      - UV_PROJECT_ENVIRONMENT=/app/.venv
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: >
+      sh -c "uv sync && \
+             uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+    depends_on:
+      - mysql-asterisk
+      - openldap
+    networks:
+      - ceph-asterisk_default
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - network.host=0.0.0.0
+      - http.host=0.0.0.0
+      - transport.host=127.0.0.1
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "127.0.0.1:9201:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    networks:
+      - ceph-asterisk_default
+
+volumes:
+  es_data:
+    name: ceph-asterisk_es_data
+
+networks:
+  ceph-asterisk_default:
+    external: true
+    driver: bridge
