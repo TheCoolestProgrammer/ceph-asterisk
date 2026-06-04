@@ -36,6 +36,20 @@ if config.DEV_MODE:
             "Accept-Ranges",
         ],
     )
+else:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://http://213.155.15.136:5173"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=[
+            "Content-Disposition",
+            "Content-Type",
+            "Content-Length",
+            "Accept-Ranges",
+        ],
+    )
 
 app.include_router(cdr.router)
 app.include_router(users.router)
