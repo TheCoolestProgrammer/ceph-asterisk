@@ -39,7 +39,7 @@ if config.DEV_MODE:
 else:
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://http://213.155.15.136:5173"],
+        allow_origins=["http://213.155.15.136:5173"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
