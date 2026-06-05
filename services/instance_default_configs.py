@@ -205,6 +205,9 @@ type=transport
 protocol={transport_type}
 bind=0.0.0.0:{instance.sip_port}
 {async_tcp}
+local_net=172.18.0.5/16
+external_media_address={config.PJSIP_EXTERNAL_ADDRESS}
+external_signaling_address={config.PJSIP_EXTERNAL_ADDRESS}
 """,
         "asterisk.conf": f"""[directories]
 astetcdir => /etc/asterisk

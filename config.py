@@ -27,6 +27,7 @@ class Config(BaseSettings):
 
     ASTERISK_ODBC_ID: str
     DSN: str
+    PJSIP_EXTERNAL_ADDRESS: str
 
     ASTERISK_UID: int
     ASTERISK_GID: int
