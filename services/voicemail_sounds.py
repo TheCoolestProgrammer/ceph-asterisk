@@ -1,38 +1,15 @@
 """Проверка наличия звуковых промптов app_voicemail (vm-intro и др.)."""
 
-import os
-
 from services.asterisk_reload import AsteriskReloadError, run_asterisk_cli
-from utils.instance_paths import docker_volume_config_dir
 from models.asterisk_instance import AsteriskInstance
 
 
 def warn_if_sounds_mount_overrides_defaults(instance: AsteriskInstance) -> str | None:
     """
-    Пустой или неполный каталог {config}/sounds монтируется поверх
-    /var/lib/asterisk/sounds/en и убирает стандартные vm-*.
+    Пользовательские звуки — общая библиотека asterisk_configs/sounds.
+    Стандартные промпты voicemail — astsoundsdir => /opt/asterisk-core-sounds.
     """
-    sounds_path = os.path.join(docker_volume_config_dir(instance), "sounds")
-    if not os.path.isdir(sounds_path):
-        return None
-    try:
-        entries = list(os.scandir(sounds_path))
-    except OSError:
-        return None
-    if not entries:
-        return (
-            "Каталог sounds/ у инстанса пуст: удалите его или добавьте vm-intro.* "
-            "(иначе после пересборки образа промпты снова пропадут при монтировании)."
-        )
-    has_vm = any(
-        e.name.startswith("vm-intro") for e in entries if e.is_file()
-    )
-    if not has_vm:
-        return (
-            "В sounds/ инстанса нет vm-intro — каталог монтируется поверх "
-            "стандартных промптов. Удалите sounds/ или скопируйте туда файлы из "
-            "asterisk-core-sounds-en."
-        )
+    _ = instance
     return None
 
 

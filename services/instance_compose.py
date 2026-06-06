@@ -68,7 +68,7 @@ def build_compose_config(instance: AsteriskInstance) -> dict:
         f"{instance_config_path}/drivers/odbcinst.ini:/etc/odbcinst.ini",
         f"{instance_config_path}/asterisk_logs:/var/log/asterisk",
     ]
-    sounds_volume = compose_sounds_volume(instance_config_path)
+    sounds_volume = compose_sounds_volume(instance)
     if sounds_volume:
         volumes.insert(1, sounds_volume)
     volumes.insert(1, compose_voicemail_volume(instance_config_path))

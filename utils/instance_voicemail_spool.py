@@ -109,23 +109,6 @@ def ensure_instance_voicemail_dir(
 
 
 def warn_if_empty_sounds_dir(instance: AsteriskInstance) -> str | None:
-    """Пустой sounds/ не монтируется, но непустой без vm-* ломает промпты."""
-    base = docker_volume_config_dir(instance)
-    sounds_path = os.path.join(base, "sounds")
-    if not os.path.isdir(sounds_path):
-        return None
-    try:
-        entries = list(os.scandir(sounds_path))
-    except OSError:
-        return None
-    if not entries:
-        return (
-            "Каталог sounds/ пуст — удалите его, иначе после добавления файлов "
-            "он может перекрыть vm-intro в контейнере."
-        )
-    if not any(e.name.startswith("vm-intro") for e in entries if e.is_file()):
-        return (
-            "Каталог sounds/ смонтирован поверх промптов Asterisk, но vm-intro "
-            "в нём нет — голосовая почта может сразу обрывать вызов."
-        )
+    """Пользовательские звуки — общая библиотека; vm-* — через astsoundsdir в образе."""
+    _ = instance
     return None

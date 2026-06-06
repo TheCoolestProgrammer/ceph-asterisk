@@ -13,6 +13,7 @@ from starlette.concurrency import run_in_threadpool
 import wave
 
 from schemas.audio_file import AudioFileSchema
+from utils.instance_volumes import shared_sounds_writable_dir
 from services.voicemail_messages import (
     list_voicemail_recordings,
     parse_voicemail_entry_id,
@@ -63,8 +64,7 @@ async def upload_audio(file: UploadFile = File(...), db: Session = Depends(get_d
     if file_ext not in [f.value for f in AudioFormat]:
         raise HTTPException(status_code=400, detail=f"Формат .{file_ext} не поддерживается")
 
-    sounds_dir = f"/app/{config.CONFIG_FOLDER}/sounds"
-    os.makedirs(sounds_dir, exist_ok=True)
+    sounds_dir = shared_sounds_writable_dir()
 
     input_path = os.path.join(sounds_dir, file.filename)
     output_path = os.path.join(sounds_dir, f"{name_without_ext}.wav")
@@ -174,7 +174,7 @@ async def get_audio_file(
     except ValueError:
         raise HTTPException(status_code=400, detail="Некорректный id файла")
 
-    sounds_dir = f"/app/{config.CONFIG_FOLDER}/sounds"
+    sounds_dir = shared_sounds_writable_dir()
     audio = db.query(AudioFile).filter(AudioFile.id == numeric_id).first()
 
     if not audio:
@@ -198,7 +198,7 @@ async def delete_audio(file_id: int = Path(...), db: Session = Depends(get_db)):
     if not audio:
         raise HTTPException(status_code=404, detail="Файл не найден")
 
-    sound_path = f"/app/{config.CONFIG_FOLDER}/sounds/{audio.name}.{audio.format}"
+    sound_path = os.path.join(shared_sounds_writable_dir(), f"{audio.name}.{audio.format}")
     if os.path.isfile(sound_path):
         os.remove(sound_path)
 

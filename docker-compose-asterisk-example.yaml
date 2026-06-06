@@ -10,7 +10,7 @@ services:
     privileged: true
     volumes:
     - ./asterisk_configs/asterisk-test_ats4:/etc/asterisk:rw
-    - ./asterisk_configs/asterisk-test_ats4/sounds:/var/lib/asterisk/sounds/en:ro
+    - ./asterisk_configs/sounds:/var/lib/asterisk/sounds/en:ro
     - ./asterisk_configs/asterisk-test_ats4/drivers/odbc.ini:/etc/odbc.ini
     - ./asterisk_configs/asterisk-test_ats4/drivers/odbcinst.ini:/etc/odbcinst.ini
 version: '3.8'
