@@ -145,7 +145,7 @@ class PjsipAor(BaseCDR):
     remove_existing = Column(Enum(Choise), default=Choise.YES)
     minimum_expiration = Column(Integer, default=60)
     default_expiration = Column(Integer, default=3600)
-    qualify_frequency = Column(Integer, default=30)
+    qualify_frequency = Column(Integer, default=0)
 
     endpoints = relationship("PjsipEndpoint", back_populates="aors_fk")
 
