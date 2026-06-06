@@ -2,7 +2,7 @@ import os
 import shutil
 
 from fastapi import APIRouter, Depends, HTTPException, File, Path, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from config import config
 from loguru import logger
 from database import get_db
@@ -13,6 +13,11 @@ from starlette.concurrency import run_in_threadpool
 import wave
 
 from schemas.audio_file import AudioFileSchema
+from utils.audio_library import (
+    resolve_shared_sound_path,
+    sync_disk_library_to_db,
+    transcode_for_preview,
+)
 from utils.instance_volumes import shared_sounds_writable_dir
 from services.voicemail_messages import (
     list_voicemail_recordings,
@@ -115,6 +120,7 @@ async def get_audio(
     mailbox: str | None = Query(None, description="Фильтр по ящику, напр. 101"),
     db: Session = Depends(get_db),
 ):
+    sync_disk_library_to_db(db)
     items = _library_items(db)
     if include_voicemail:
         if instance_id is None:
@@ -157,16 +163,13 @@ async def get_audio_file(
             raise HTTPException(status_code=404, detail="Запись не найдена") from None
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
-        media = "audio/wav"
-        suffix = audio_path.suffix.lower()
-        if suffix == ".gsm":
-            media = "audio/gsm"
-        elif suffix in (".ulaw", ".alaw"):
-            media = "audio/basic"
-        return FileResponse(
-            path=str(audio_path),
-            media_type=media,
-            filename=audio_path.name,
+        preview_bytes, preview_name = await run_in_threadpool(
+            transcode_for_preview, audio_path
+        )
+        return Response(
+            content=preview_bytes,
+            media_type="audio/wav",
+            headers={"Content-Disposition": f'inline; filename="{preview_name}"'},
         )
 
     try:
@@ -174,21 +177,22 @@ async def get_audio_file(
     except ValueError:
         raise HTTPException(status_code=400, detail="Некорректный id файла")
 
-    sounds_dir = shared_sounds_writable_dir()
     audio = db.query(AudioFile).filter(AudioFile.id == numeric_id).first()
 
     if not audio:
         raise HTTPException(status_code=404, detail="Файл не найден в базе данных")
 
-    file_path = os.path.join(sounds_dir, f"{audio.name}.{audio.format}")
-
-    if not os.path.exists(file_path):
+    file_path = resolve_shared_sound_path(audio.name, audio.format)
+    if file_path is None:
         raise HTTPException(status_code=404, detail="Файл не найден на сервере")
 
-    return FileResponse(
-        path=file_path,
-        media_type=f"audio/{audio.format}",
-        filename=f"{audio.name}.{audio.format}",
+    preview_bytes, preview_name = await run_in_threadpool(
+        transcode_for_preview, file_path
+    )
+    return Response(
+        content=preview_bytes,
+        media_type="audio/wav",
+        headers={"Content-Disposition": f'inline; filename="{preview_name}"'},
     )
 
 
@@ -198,8 +202,8 @@ async def delete_audio(file_id: int = Path(...), db: Session = Depends(get_db)):
     if not audio:
         raise HTTPException(status_code=404, detail="Файл не найден")
 
-    sound_path = os.path.join(shared_sounds_writable_dir(), f"{audio.name}.{audio.format}")
-    if os.path.isfile(sound_path):
+    sound_path = resolve_shared_sound_path(audio.name, audio.format)
+    if sound_path is not None:
         os.remove(sound_path)
 
     db.delete(audio)
