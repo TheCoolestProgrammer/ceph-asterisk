@@ -20,7 +20,20 @@ async def get_logs(page: int = 0, limit: int = 5, level: Optional[str] = None, p
         query["bool"]["must"].append({"match_phrase": {"asterisk.message": text}})
 
     if level:
-        query["bool"]["filter"].append({"term": {"asterisk.level.keyword": level}})
+        if level == "UNKNOWN":
+            # В ответе UNKNOWN подставляется, если dissect не распарсил уровень.
+            # В ES такие документы не имеют поля asterisk.level.
+            query["bool"]["filter"].append({
+                "bool": {
+                    "should": [
+                        {"bool": {"must_not": {"exists": {"field": "asterisk.level"}}}},
+                        {"term": {"asterisk.level.keyword": "UNKNOWN"}},
+                    ],
+                    "minimum_should_match": 1,
+                }
+            })
+        else:
+            query["bool"]["filter"].append({"term": {"asterisk.level.keyword": level}})
 
     if pbx_id:
         query["bool"]["filter"].append({"term": {"pbx_id.keyword": pbx_id}})
