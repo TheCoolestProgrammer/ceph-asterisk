@@ -1,5 +1,24 @@
 version: '3.8'
 
+x-fastapi-base: &fastapi-base
+  build:
+    context: .
+    dockerfile: dockerfile.web
+  ports:
+    - "8000:8000"
+  environment:
+    - DEV_MODE=${DEV_MODE}
+    - HOST_PROJECT_PATH=${HOST_PROJECT_PATH}
+    - PYTHONUNBUFFERED=1
+    - PYTHONDONTWRITEBYTECODE=1
+    - UV_PROJECT_ENVIRONMENT=/app/.venv
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  depends_on:
+    - mysql-asterisk
+  networks:
+    - ceph-asterisk_default
+
 services:
   mysql-asterisk:
     container_name: ${MYSQL_CONTAINER_NAME}
@@ -57,32 +76,26 @@ services:
     networks:
       - ceph-asterisk_default
 
-  fastapi-app:
-    build:
-      context: .
-      dockerfile: dockerfile.web
+  fastapi-dev:
+    <<: *fastapi-base
+    profiles: [dev]
     container_name: fastapi-dev
-    ports:
-      - "8000:8000"
     volumes:
       - ./:/app
       - /app/.venv
       - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      - HOST_PROJECT_PATH=${HOST_PROJECT_PATH}
-      - PYTHONUNBUFFERED=1
-      - PYTHONDONTWRITEBYTECODE=1
-      - UV_PROJECT_ENVIRONMENT=/app/.venv
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     command: >
-      sh -c "uv sync && \
+      sh -c "uv sync &&
              uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
-    depends_on:
-      - mysql-asterisk
-      # - openldap
-    networks:
-      - ceph-asterisk_default
+
+  fastapi-prod:
+    <<: *fastapi-base
+    profiles: [prod]
+    container_name: fastapi-prod
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: >
+      uv run uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2
 
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0

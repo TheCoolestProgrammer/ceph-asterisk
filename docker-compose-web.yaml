@@ -1,5 +1,8 @@
+# Устарело: предпочтительно docker compose --profile dev (docker-compose.yaml).
+# Этот файл — только FastAPI без MySQL/LDAP, для локальной отладки API.
+
 services:
-  fastapi-app:
+  fastapi-dev:
     build:
       context: .
       dockerfile: dockerfile.web
@@ -7,25 +10,17 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      # Монтируем всю директорию проекта для hot-reload
-      # - /home/vasya/ceph-asterisk/:/app
       - ./:/app
-      # - shared_configs: ./asterisk_configs
-      # Исключаем виртуальное окружение из монтирования (опционально)
       - /app/.venv
-      - /var/run/docker.sock:/var/run/docker.sock # ПРОБРОС СОКЕТА
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      - HOST_PROJECT_PATH=/home/vasya/ceph-asterisk
+      - DEV_MODE=${DEV_MODE:-true}
+      - HOST_PROJECT_PATH=${HOST_PROJECT_PATH}
       - PYTHONUNBUFFERED=1
       - PYTHONDONTWRITEBYTECODE=1
-      - UV_PROJECT_ENVIRONMENT=/app/.venv  # Указываем где виртуальное окружение
-      # - HTTP_PROXY=http://host.docker.internal:12345
-      # - HTTPS_PROXY=http://host.docker.internal:12345
+      - UV_PROJECT_ENVIRONMENT=/app/.venv
     extra_hosts:
-      # Это заставит Docker понять, куда ведет хост-имя
       - "host.docker.internal:host-gateway"
     command: >
-      sh -c "uv sync && 
+      sh -c "uv sync &&
              uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
-# volumes:
-#   shared_configs:
