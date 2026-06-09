@@ -100,6 +100,20 @@ services:
     command: >
       uv run uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2
 
+  logrotate:
+    build:
+      context: .
+      dockerfile: docker/logrotate.Dockerfile
+    container_name: logrotate
+    environment:
+      - LOG_ROTATE_MAX_SIZE=${LOG_ROTATE_MAX_SIZE:-50M}
+      - LOG_ROTATE_KEEP=${LOG_ROTATE_KEEP:-3}
+      - LOG_ROTATE_INTERVAL_SEC=${LOG_ROTATE_INTERVAL_SEC:-900}
+    volumes:
+      - ./asterisk_configs:/logs:rw
+      - logrotate_state:/var/lib/logrotate
+    restart: unless-stopped
+
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
     container_name: elasticsearch
@@ -120,6 +134,8 @@ services:
 volumes:
   es_data:
     name: ceph-asterisk_es_data
+  logrotate_state:
+    name: ceph-asterisk_logrotate_state
 
 networks:
   ceph-asterisk_default:

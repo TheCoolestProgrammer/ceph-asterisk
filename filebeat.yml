@@ -2,7 +2,7 @@ filebeat.inputs:
 - type: log
   enabled: true
   paths:
-    - /var/log/asterisk/messages* # Добавили звездочку на случай ротации логов
+    - /var/log/asterisk/messages
   fields:
     pbx_id: ${PBX_NAME}
   fields_under_root: true          # Теперь это внутри блока инпута

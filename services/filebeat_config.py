@@ -15,7 +15,8 @@ def write_filebeat_config(instance_name: str) -> str:
             {
                 "type": "log",
                 "enabled": True,
-                "paths": ["/var/log/asterisk/messages*"],
+                # Только активный файл; архивы messages-YYYYMMDD.gz читает logrotate, в ES уже есть
+                "paths": ["/var/log/asterisk/messages"],
                 "fields": {"pbx_id": "${PBX_NAME}"},
                 "fields_under_root": True,
             }
