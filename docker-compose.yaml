@@ -93,6 +93,9 @@ services:
     profiles: [prod]
     container_name: fastapi-prod
     volumes:
+      # Конфиги АТС и compose-файлы инстансов — на хосте (Asterisk монтирует их через HOST_PROJECT_PATH)
+      - ./asterisk_configs:/app/asterisk_configs
+      - ./docker-compose:/app/docker-compose
       - /var/run/docker.sock:/var/run/docker.sock
     command: >
       uv run uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2
