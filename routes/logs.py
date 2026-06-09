@@ -40,7 +40,7 @@ async def get_logs(page: int = 0, limit: int = 5, level: Optional[str] = None, p
         )
     except NotFoundError:
         # Индекс ещё не создан, Filebeat не отправил логи
-        return {"status": "success", "data": [], "total": 0}
+        return {"status": "success", "data": [], "total": 0, "relation": "eq"}
 
     logs = []
     for hit in response["hits"]["hits"]:
@@ -57,6 +57,12 @@ async def get_logs(page: int = 0, limit: int = 5, level: Optional[str] = None, p
             "pbx_id": source.get("pbx_id")
         })
 
-    return {"status": "success", "data": logs, "total": response["hits"]["total"]["value"]}
+    total = response["hits"]["total"]
+    return {
+        "status": "success",
+        "data": logs,
+        "total": total["value"],
+        "relation": total["relation"],
+    }
 
 

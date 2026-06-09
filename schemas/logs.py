@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional, Union
+from typing import List, Literal, Optional, Union
 from pydantic import BaseModel, Field
 
 class ParsedMessageModel(BaseModel):
@@ -20,3 +20,7 @@ class LogsModel(BaseModel):
     status: str
     data: List[LogEntry]
     total: int = Field(..., description="Общее количество найденных записей")
+    relation: Literal["eq", "gte"] = Field(
+        ...,
+        description="Точность total: eq — точное значение, gte — не меньше total (ограничение Elasticsearch 10000)",
+    )
