@@ -54,6 +54,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 # Копирование остальных файлов (будет перезаписано volume в dev режиме)
 COPY . .
+RUN chmod +x deploy/entrypoint.sh
 
 # Команда по умолчанию (переопределяется в docker-compose)
 CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,7 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.core.database import Base, engine, BaseCDR, engine_cdr
 from app.routes import cdr, users, auth, queues, voicemail, dialplan
 from app.routes.instances import instances, instancesCRUD
 from app.routes.instances.configs import instance_configs
@@ -12,8 +11,6 @@ from app.core.ldap_auth import LDAPAuth
 from app.core.elastic import setup_elastic_pipeline
 from app.core.config import config
 
-Base.metadata.create_all(bind=engine)
-BaseCDR.metadata.create_all(bind=engine_cdr)
 # setup_elastic_pipeline()
 app = FastAPI(title="Asterisk Manager")
 if config.DEV_MODE:

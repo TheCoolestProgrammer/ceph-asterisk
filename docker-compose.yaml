@@ -17,7 +17,8 @@ x-fastapi-base: &fastapi-base
   extra_hosts:
     - "host.docker.internal:host-gateway"
   depends_on:
-    - mysql-asterisk
+    mysql-asterisk:
+      condition: service_healthy
   networks:
     - ceph-asterisk_default
 
@@ -33,6 +34,12 @@ services:
     volumes:
       - ./mysql_data:/var/lib/mysql
       - ./deploy/init.sh:/docker-entrypoint-initdb.d/init.sh
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     networks:
       - ceph-asterisk_default
 
@@ -74,7 +81,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     command: >
       sh -c "uv sync &&
-             uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+             sh deploy/entrypoint.sh uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 
   fastapi-prod:
     <<: *fastapi-base
@@ -85,7 +92,7 @@ services:
       - ./docker-compose:/app/docker-compose
       - /var/run/docker.sock:/var/run/docker.sock
     command: >
-      uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+      sh deploy/entrypoint.sh uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
 
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0

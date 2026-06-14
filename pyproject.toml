@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "alembic>=1.18.4",
     "cryptography>=46.0.3",
     "docker>=7.1.0",
     "elasticsearch[async]<9.0.0",
