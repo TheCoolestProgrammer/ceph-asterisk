@@ -18,6 +18,9 @@ srv/
 mystuff/
 
 .env
+.env.mysql
+.env.fastapi
+.env.ldap
 
 #LDAP
 ldap_data/

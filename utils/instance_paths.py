@@ -14,7 +14,7 @@ def host_project_root() -> str:
     """
     Корень проекта на хосте (для docker run -v / compose).
 
-    В API-контейнере задайте HOST_PROJECT_PATH=/home/user/ceph-asterisk в .env.
+    В API-контейнере задайте HOST_PROJECT_PATH=/home/user/ceph-asterisk в .env.fastapi.
     """
     explicit = (config.HOST_PROJECT_PATH or os.environ.get("HOST_PROJECT_PATH", "")).strip()
     if explicit:
