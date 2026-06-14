@@ -1,0 +1,214 @@
+from enum import Enum
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import Optional
+from datetime import datetime
+from app.models.asterisk_instance import CallerIdModes
+
+class CDRState(str, Enum):
+    ON = "yes"
+    OFF = "no"
+
+class ChangeCDRStatus(BaseModel):
+    instance_name:str
+    enabled: CDRState
+
+class AsteriskInstanceUpdate(BaseModel):
+    name: Optional[str] = None
+    sip_port: Optional[int] = None
+    http_port: Optional[int] = None
+    status: Optional[str] = None
+    rtp_port_start: Optional[int] = Field(default=None, ge=1, le=65535)
+    rtp_port_end: Optional[int] = Field(default=None, ge=1, le=65535)
+    ami_port: Optional[int] = Field(default=None, ge=1, le=65535)
+    change_author: Optional[str] = None
+
+    @field_validator(
+        "ami_port", "http_port", "rtp_port_start", "rtp_port_end", mode="before"
+    )
+    @classmethod
+    def coerce_port_int(cls, value: object) -> object:
+        if value is None or value == "":
+            return None
+        if isinstance(value, bool):
+            raise ValueError("port must be an integer")
+        if isinstance(value, float):
+            return round(value)
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return None
+            return round(float(value)) if "." in value else int(value)
+        return int(value)
+
+class CDRGet(BaseModel):
+    instance_name: Optional[str] = (None,)
+    src: Optional[str] = (None,)
+    dst: Optional[str] = (None,)
+    date_from: Optional[str] = (None,)
+    date_to: Optional[str] = (None,)
+    limit: int = (100,)
+    offset: int = (0,)
+
+
+class CDRRecord(BaseModel):
+    id: int
+    calldate: datetime
+    clid: str
+    src: str
+    dst: str
+    duration: int
+    billsec: int
+    disposition: str
+    uniqueid: str
+    userfield: str
+    instance_name: str
+
+
+class ActiveCall(BaseModel):
+    id: int
+    uniqueid: str
+    channel: str
+    src: str
+    dst: str
+    state: str
+    start_time: datetime
+    instance_name: str
+
+
+class CallFilter(BaseModel):
+    instance_name: Optional[str] = None
+    src: Optional[str] = None
+    dst: Optional[str] = None
+    date_from: Optional[datetime] = None
+    date_to: Optional[datetime] = None
+    limit: int = 100
+    offset: int = 0
+
+class TransportType(str, Enum):
+    UDP="udp"
+    TCP="tcp"
+    TLS="tls"
+
+class AsteriskInstanceCreate(BaseModel):
+    name: str
+    sip_port: int
+    http_port: int
+    rtp_port_start:int
+    rtp_port_end:int
+    ami_port:int
+    transport_type:TransportType = TransportType.UDP
+    # inbound_mode:CallerIdModes = CallerIdModes.ON
+
+
+class AsteriskInstanceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    sip_port: int
+    http_port: int
+    rtp_port_start: int
+    rtp_port_end: int
+    ami_port: int
+    status: str
+    # inbound_mode:str
+
+
+class ConfigUpdate(BaseModel):
+    config_type: str  # sip, extensions, etc.
+    content: str
+    change_author: Optional[str] = "api"
+
+
+class ConfigHistoryEntry(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    instance_id: int
+    filename: str
+    version: int
+    description: Optional[str] = None
+    created_at: datetime
+    author: str
+
+
+class ConfigHistoryListResponse(BaseModel):
+    config_type: str
+    filename: str
+    items: list[ConfigHistoryEntry]
+
+
+class ConfigHistoryVersionContent(BaseModel):
+    config_type: str
+    filename: str
+    version: int
+    history_id: int
+    description: Optional[str] = None
+    created_at: datetime
+    author: str
+    content: str
+    source: str = "history"
+
+
+class ConfigRollbackRequest(BaseModel):
+    """Откат к версии из ast_config_history (укажите history_id или version)."""
+
+    history_id: Optional[int] = None
+    version: Optional[int] = None
+    change_author: Optional[str] = "api"
+    reload_asterisk: bool = True
+
+
+class ConfigRollbackResponse(BaseModel):
+    message: str
+    filename: str
+    restored_version: int
+    history_id: int
+    rows_restored: int
+    snapshot_saved_version: Optional[int] = None
+
+
+# class SIPUserCreate(BaseModel):
+#     username: str
+#     password: str
+#     callerid: str
+#     account_code: str = ""
+#     context: str = "internal"
+#     instance_name: str
+
+
+# class SIPUserUpdate(BaseModel):
+#     password: Optional[str] = None
+#     callerid: Optional[str] = None
+#     account_code: Optional[str] = None
+#     context: Optional[str] = None
+#     is_active: Optional[bool] = None
+
+
+# class SIPUserResponse(BaseModel):
+#     id: int
+#     username: str
+#     callerid: str
+#     account_code: str
+#     context: str
+#     instance_name: str
+#     is_active: bool
+#     created_at: datetime
+
+#     class Config:
+#         from_attributes = True
+
+
+# class CDRRecordWithUsers(BaseModel):
+#     id: int
+#     calldate: datetime
+#     src: str
+#     dst: str
+#     src_user: Optional[SIPUserResponse] = None
+#     dst_user: Optional[SIPUserResponse] = None
+#     duration: int
+#     billsec: int
+#     disposition: str
+#     accountcode: str
+#     dcontext: str
+#     instance_name: str

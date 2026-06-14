@@ -11,7 +11,6 @@ wheels/
 
 asterisk_configs/
 docker-compose/*
-!docker-compose/dockerfile
 #docker - ceph
 etc/
 srv/

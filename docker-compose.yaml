@@ -3,12 +3,14 @@ version: '3.8'
 x-fastapi-base: &fastapi-base
   build:
     context: .
-    dockerfile: dockerfile.web
+    dockerfile: deploy/dockerfile.web
   ports:
     - "8000:8000"
+  env_file:
+    - .env.fastapi
+    - .env.mysql
+    - .env.ldap
   environment:
-    - DEV_MODE=${DEV_MODE}
-    - HOST_PROJECT_PATH=${HOST_PROJECT_PATH}
     - PYTHONUNBUFFERED=1
     - PYTHONDONTWRITEBYTECODE=1
     - UV_PROJECT_ENVIRONMENT=/app/.venv
@@ -24,41 +26,28 @@ services:
     container_name: ${MYSQL_CONTAINER_NAME}
     image: mysql:8.0
     command: --default-authentication-plugin=mysql_native_password
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${MYSQL_DATABASE}
-      MYSQL_DATABASE_CDR: ${MYSQL_DATABASE_CDR}
-      MYSQL_USER: ${MYSQL_USER}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-      MYSQL_ASTERISK_USER: ${MYSQL_ASTERISK_USER}
-      MYSQL_ASTERISK_USER_PASSWORD: ${MYSQL_ASTERISK_USER_PASSWORD}
+    env_file:
+      - .env.mysql
     ports:
       - "${MYSQL_PORT}:3306"
     volumes:
       - ./mysql_data:/var/lib/mysql
-      - ./init.sh:/docker-entrypoint-initdb.d/init.sh
+      - ./deploy/init.sh:/docker-entrypoint-initdb.d/init.sh
     networks:
       - ceph-asterisk_default
 
   openldap:
     image: osixia/openldap:latest
     container_name: openldap
-    environment:
-      LDAP_LOG_LEVEL: "256"
-      LDAP_ORGANISATION: "planeta Inc."
-      LDAP_DOMAIN: "planeta.ru"
-      LDAP_BASE_DN: "dc=planeta,dc=ru"
-      LDAP_ADMIN_PASSWORD: "admin"
-      LDAP_CONFIG_PASSWORD: "admin"
-      LDAP_READONLY_USER: "false"
-      LDAP_TLS: "false"
+    env_file:
+      - .env.ldap
     ports:
       - "389:389"
       - "636:636"
     volumes:
       - ./ldap_data:/var/lib/ldap
       - ./ldap_config:/etc/ldap/slapd.d
-      - ./ldif_files:/container/service/slapd/assets/config/bootstrap/ldif/custom
+      - ./deploy/ldif_files:/container/service/slapd/assets/config/bootstrap/ldif/custom
     command: --copy-service --loglevel debug
     networks:
       - ceph-asterisk_default
@@ -66,9 +55,8 @@ services:
   phpldapadmin:
     image: osixia/phpldapadmin:latest
     container_name: phpldapadmin
-    environment:
-      PHPLDAPADMIN_LDAP_HOSTS: "openldap"
-      PHPLDAPADMIN_HTTPS: "false"
+    env_file:
+      - .env.ldap
     ports:
       - "8080:80"
     depends_on:
@@ -81,24 +69,23 @@ services:
     profiles: [dev]
     container_name: fastapi-dev
     volumes:
-      - ./:/app
+      - .:/app
       - /app/.venv
       - /var/run/docker.sock:/var/run/docker.sock
     command: >
       sh -c "uv sync &&
-             uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+             uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 
   fastapi-prod:
     <<: *fastapi-base
     profiles: [prod]
     container_name: fastapi-prod
     volumes:
-      # Конфиги АТС и compose-файлы инстансов — на хосте (Asterisk монтирует их через HOST_PROJECT_PATH)
       - ./asterisk_configs:/app/asterisk_configs
       - ./docker-compose:/app/docker-compose
       - /var/run/docker.sock:/var/run/docker.sock
     command: >
-      uv run uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2
+      uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
 
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
