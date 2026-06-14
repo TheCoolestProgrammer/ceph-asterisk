@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routes import cdr, users, auth, queues, voicemail, dialplan
@@ -6,13 +6,17 @@ from app.routes.instances import instances, instancesCRUD
 from app.routes.instances.configs import instance_configs
 from app.routes import logs
 from app.routes import audio_files
-from app.core.config import config
-from app.core.ldap_auth import LDAPAuth
-from app.core.elastic import setup_elastic_pipeline
+from app.routes.auth import require_auth
 from app.core.config import config
 
 # setup_elastic_pipeline()
-app = FastAPI(title="Asterisk Manager")
+app = FastAPI(
+    title="Asterisk Manager",
+    docs_url="/docs" if config.DEV_MODE else None,
+    redoc_url="/redoc" if config.DEV_MODE else None,
+    openapi_url="/openapi.json" if config.DEV_MODE else None,
+)
+_auth_deps = [] if config.DEV_MODE else [Depends(require_auth)]
 if config.DEV_MODE:
     app.add_middleware(
         CORSMiddleware,
@@ -48,17 +52,17 @@ else:
         ],
     )
 
-app.include_router(cdr.router)
-app.include_router(users.router)
-app.include_router(queues.router)
-app.include_router(voicemail.router)
-app.include_router(instancesCRUD.router)
-app.include_router(instances.router)
-app.include_router(instance_configs.router)
+app.include_router(cdr.router, dependencies=_auth_deps)
+app.include_router(users.router, dependencies=_auth_deps)
+app.include_router(queues.router, dependencies=_auth_deps)
+app.include_router(voicemail.router, dependencies=_auth_deps)
+app.include_router(instancesCRUD.router, dependencies=_auth_deps)
+app.include_router(instances.router, dependencies=_auth_deps)
+app.include_router(instance_configs.router, dependencies=_auth_deps)
 app.include_router(auth.router)
-app.include_router(audio_files.router)
-app.include_router(logs.router)
-app.include_router(dialplan.router)
+app.include_router(audio_files.router, dependencies=_auth_deps)
+app.include_router(logs.router, dependencies=_auth_deps)
+app.include_router(dialplan.router, dependencies=_auth_deps)
 
 
 @app.get("/health_check")

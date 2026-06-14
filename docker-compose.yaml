@@ -4,8 +4,6 @@ x-fastapi-base: &fastapi-base
   build:
     context: .
     dockerfile: deploy/dockerfile.web
-  ports:
-    - "8000:8000"
   env_file:
     - .env.fastapi
     - .env.mysql
@@ -20,7 +18,9 @@ x-fastapi-base: &fastapi-base
     mysql-asterisk:
       condition: service_healthy
   networks:
-    - ceph-asterisk_default
+    ceph-asterisk_default:
+      aliases:
+        - fastapi
 
 services:
   mysql-asterisk:
@@ -30,7 +30,7 @@ services:
     env_file:
       - .env.mysql
     ports:
-      - "${MYSQL_PORT}:3306"
+      - "127.0.0.1:${MYSQL_PORT}:3306"
     volumes:
       - ./mysql_data:/var/lib/mysql
       - ./deploy/init.sh:/docker-entrypoint-initdb.d/init.sh
@@ -48,9 +48,6 @@ services:
     container_name: openldap
     env_file:
       - .env.ldap
-    ports:
-      - "389:389"
-      - "636:636"
     volumes:
       - ./ldap_data:/var/lib/ldap
       - ./ldap_config:/etc/ldap/slapd.d
@@ -65,7 +62,7 @@ services:
     env_file:
       - .env.ldap
     ports:
-      - "8080:80"
+      - "127.0.0.1:8080:80"
     depends_on:
       - openldap
     networks:
@@ -75,6 +72,8 @@ services:
     <<: *fastapi-base
     profiles: [dev]
     container_name: fastapi-dev
+    ports:
+      - "127.0.0.1:8000:8000"
     volumes:
       - .:/app
       - /app/.venv
@@ -87,12 +86,30 @@ services:
     <<: *fastapi-base
     profiles: [prod]
     container_name: fastapi-prod
+    expose:
+      - "8000"
     volumes:
       - ./asterisk_configs:/app/asterisk_configs
       - ./docker-compose:/app/docker-compose
       - /var/run/docker.sock:/var/run/docker.sock
     command: >
       sh deploy/entrypoint.sh uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: nginx
+    profiles: [prod]
+    ports:
+      - "80:80"
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./deploy/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./deploy/nginx/proxy_params:/etc/nginx/proxy_params:ro
+    depends_on:
+      - fastapi-prod
+    networks:
+      - ceph-asterisk_default
+    restart: unless-stopped
 
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0

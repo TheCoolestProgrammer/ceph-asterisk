@@ -12,39 +12,68 @@ from app.core.security import (
     verify_token,
     # create_LDAP_tokens,
 )
+from app.core.config import config
 from app.core.database import get_db
 from app.core.ldap_auth import ldap_auth
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 security = HTTPBearer()
+optional_security = HTTPBearer(auto_error=False)
+
+_credentials_exception = HTTPException(
+    status_code=status.HTTP_401_UNAUTHORIZED,
+    detail="Could not validate credentials",
+    headers={"WWW-Authenticate": "Bearer"},
+)
+
+
+def _authenticate_user(
+    credentials: HTTPAuthorizationCredentials,
+    db: Session,
+) -> User:
+    payload = verify_token(credentials.credentials, is_refresh=False)
+    if payload is None:
+        raise _credentials_exception
+
+    user_id: int = payload.get("user_id")
+    if user_id is None:
+        raise _credentials_exception
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        raise _credentials_exception
+
+    return user
 
 
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db),
-):
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+) -> User:
+    return _authenticate_user(credentials, db)
 
-    payload = verify_token(credentials.credentials, is_refresh=False)
-    if payload is None:
-        raise credentials_exception
 
-    user_id: int = payload.get("user_id")
-    if user_id is None:
-        raise credentials_exception
-    user = db.query(User).filter(User.id == user_id).first()
-    if user is None:
-        raise credentials_exception
+def require_auth(
+    credentials: HTTPAuthorizationCredentials | None = Depends(optional_security),
+    db: Session = Depends(get_db),
+) -> None:
+    if config.DEV_MODE:
+        return
 
-    return user
+    if credentials is None:
+        raise _credentials_exception
+
+    _authenticate_user(credentials, db)
 
 
 @router.post("/register", response_model=UserResponse)
 def register(user_data: UserRegister, db: Session = Depends(get_db)):
+    if not config.DEV_MODE:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Registration is disabled in production",
+        )
+
     existing_user = db.query(User).filter(User.login == user_data.login).first()
     if existing_user:
         raise HTTPException(
