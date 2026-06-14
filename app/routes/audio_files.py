@@ -4,11 +4,9 @@ import shutil
 from fastapi import APIRouter, Depends, HTTPException, File, Path, Query, UploadFile
 from fastapi.responses import Response
 from app.core.config import config
-from loguru import logger
 from app.core.database import get_db
 from app.models.asterisk_instance import AsteriskInstance
 from app.models.audio_files import AudioFile, AudioFormat
-from pydub import AudioSegment
 from starlette.concurrency import run_in_threadpool
 import wave
 
@@ -16,8 +14,8 @@ from app.schemas.audio_file import AudioFileSchema
 from app.utils.audio_library import (
     resolve_shared_sound_path,
     sync_disk_library_to_db,
-    transcode_for_preview,
 )
+from app.utils.audio_transcode import convert_to_asterisk_wav, transcode_for_preview
 from app.utils.instance_volumes import shared_sounds_writable_dir
 from app.services.voicemail_messages import (
     list_voicemail_recordings,
@@ -28,17 +26,6 @@ from sqlalchemy.orm import Session
 
 
 router = APIRouter(prefix="/audio_files")
-
-
-def convert_to_asterisk_wav(input_path: str, output_path: str):
-    try:
-        audio = AudioSegment.from_file(input_path)
-        audio = audio.set_frame_rate(8000).set_channels(1).set_sample_width(2)
-        audio.export(output_path, format="wav")
-        return True
-    except Exception as e:
-        logger.error(f"Conversion error: {e}")
-        return False
 
 
 def _library_items(db: Session) -> list[AudioFileSchema]:

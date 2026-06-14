@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import io
 import wave
 from datetime import date
 from pathlib import Path
 
-from pydub import AudioSegment
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -15,7 +13,6 @@ from app.models.audio_files import AudioFile, AudioFormat
 from app.utils.instance_volumes import shared_sounds_writable_dir
 
 SUPPORTED_EXTENSIONS = {f.value for f in AudioFormat}
-PREVIEW_SAMPLE_RATE = 44100
 
 AUDIO_MEDIA_TYPES = {
     "wav": "audio/wav",
@@ -115,20 +112,3 @@ def sync_disk_library_to_db(db: Session) -> None:
 
 def library_media_type(fmt: str) -> str:
     return AUDIO_MEDIA_TYPES.get(fmt.lower(), f"audio/{fmt.lower()}")
-
-
-def transcode_for_preview(source: Path) -> tuple[bytes, str]:
-    """
-    Конвертирует звук в стандартный WAV 44.1 kHz для браузера и обычных плееров.
-
-    На диске для Asterisk остаётся исходный telephony-формат (8 kHz).
-    """
-    audio = AudioSegment.from_file(str(source))
-    audio = (
-        audio.set_frame_rate(PREVIEW_SAMPLE_RATE)
-        .set_channels(1)
-        .set_sample_width(2)
-    )
-    buffer = io.BytesIO()
-    audio.export(buffer, format="wav")
-    return buffer.getvalue(), f"{source.stem}.wav"
